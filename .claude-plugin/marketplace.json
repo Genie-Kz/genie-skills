@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "genie-skills",
+  "description": "Genie-Kz が公開するエージェント用スキルの配布元",
+  "owner": { "name": "Genie-Kz" },
+  "plugins": [
+    {
+      "name": "genie-skills",
+      "source": "./",
+      "description": "Genie-Kz の自作スキル集"
+    }
+  ]
+}

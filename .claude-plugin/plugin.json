@@ -1,0 +1,8 @@
+{
+  "name": "genie-skills",
+  "description": "Genie-Kz の自作スキル集",
+  "version": "0.1.0",
+  "author": { "name": "Genie-Kz" },
+  "homepage": "https://github.com/Genie-Kz/genie-skills",
+  "license": "MIT"
+}

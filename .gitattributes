@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+# Keep the exported source bytes on every checkout. Edition hashes include the engine bytes.
+skills/** -text
