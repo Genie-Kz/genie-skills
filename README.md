@@ -7,9 +7,15 @@ Install with GitHub CLI, add the Claude Code plugin, or copy a skill into your a
 
 | スキル | できること | 必要なもの |
 | --- | --- | --- |
-| [`visual-consensus`](skills/visual-consensus/SKILL.md) | 画面案や選択肢を一つの HTML にまとめ、選択・コメント・画像のピンで集めた回答を次の回の資料に反映する。 | Node.js 22.15 以降（資料を作るとき） |
+| [`visual-consensus`](docs/visual-consensus/README.md) | 画面案や選択肢を一つの HTML にまとめ、選択・コメント・画像のピンで集めた回答を次の回の資料に反映する。 | Node.js 22.15 以降（資料を作るとき） |
 
-## GitHub CLI で入れる
+スキル名を押すと、`docs/` にある説明のページを開きます。できることを画面の例とともに説明しています。説明のページがないスキルは `SKILL.md` を開きます。
+
+## 導入方法
+
+使う環境に合わせて、次のどれかの方法で入れます。
+
+### GitHub CLI
 
 `gh skill install` が使える GitHub CLI で、使いたいスキルとエージェントを指定します。次の例は Codex のすべてのプロジェクトで使えるようにします。
 
@@ -19,7 +25,7 @@ gh skill install Genie-Kz/genie-skills visual-consensus --agent codex --scope us
 
 Claude Code には `--agent claude-code`、Antigravity には `--agent antigravity` を指定します。一つのプロジェクトだけで使うときは、その Git リポジトリで `--scope project` を指定します。[GitHub CLI のコマンド説明](https://cli.github.com/manual/gh_skill_install)
 
-## Claude Code のプラグインとして入れる
+### Claude Code のプラグイン
 
 Claude Code で次のコマンドを順番に入力します。最初の行で配布元を登録し、次の行で収録スキルをまとめてインストールします。
 
@@ -30,7 +36,7 @@ Claude Code で次のコマンドを順番に入力します。最初の行で�
 
 インストール後は `/genie-skills:visual-consensus` で呼び出せます。[Claude Code のマーケットプレイス](https://code.claude.com/docs/en/plugin-marketplaces)
 
-## 手でコピーして入れる
+### フォルダーのコピー
 
 このリポジトリをダウンロードするか `git clone https://github.com/Genie-Kz/genie-skills.git` で取得します。`skills/visual-consensus/` のように、使いたいスキルのフォルダーを丸ごと次の場所にコピーしてください。たとえば Codex なら `~/.codex/skills/visual-consensus/SKILL.md` ができれば配置は完了です。
 
@@ -40,31 +46,6 @@ Claude Code で次のコマンドを順番に入力します。最初の行で�
 | Claude Code | `~/.claude/skills/` |
 | Antigravity（すべてのプロジェクト） | `~/.gemini/config/skills/` |
 | Antigravity（一つのプロジェクト） | そのプロジェクトの `.agents/skills/` |
-
-## キーボード操作
-
-各セクションには「このセクションにコメント」から、資料全体には「全体へのコメント」の「全体にコメント」から、文章と画像を追加できます。既存の依頼もこのページで編集できます。「完了」を押したコメントや依頼は「決定事項」の「完了したもの」から読み返せます。
-
-visual-consensus で作った資料をブラウザーで開くと、次のキーを使えます。表の `Ctrl` は、Mac では `⌘`（Command）です。
-
-| キー | 操作する場所 | 動作 |
-| --- | --- | --- |
-| `Ctrl+S` | 資料全体 | 回答を保存する。初めて保存するときは保存先を選ぶ。 |
-| `Ctrl+Enter` | コメント、依頼、セクションの題名・本文 | 入力を確定する。新しいセクションは、題名を入力してあれば追加する。 |
-| `Esc` | 入力欄 | セクションの編集中の欄や画像名の変更を取り消す。コメントは内容を保って閉じ、既存の依頼は編集の下書きを残して閉じる。 |
-| `Esc` | メニュー・画像ビューア・削除の確認 | メニューや画像を閉じる。削除の確認ではキャンセルする。印の位置を指定中なら配置を取り消し、印を編集中なら編集欄を閉じる。 |
-| `Ctrl+E` | 追加したセクション | 表示中のセクションの「閲覧」と「編集」を切り替える。 |
-| `Enter` または `Space` | 「編集」にしたセクションの題名・本文 | フォーカスのある欄の編集を始める。 |
-| `Enter` または `Tab` | セクションの題名、画像の名前 | 題名の入力中は本文へ移る。画像名の入力中は名前を確定する。 |
-| `Ctrl+B` | 書式ボタンのある入力欄 | 太字を切り替える。 |
-| 行頭で `-` に続けて `Space` | 書式ボタンのある入力欄 | 箇条書きを始める。 |
-| `Ctrl+V` | 書式ボタンのある入力欄、セクション | コピーした画像を入力位置に貼る。欄の外ではセクションに添付する。 |
-| `Ctrl+Z` | 書式ボタンのある入力欄 | 直前の編集を元に戻す。本文から消した画像も戻せる。 |
-| `Enter` または `Space` | 画像ビューアの画像 | ピンを置く位置の指定を始める。位置の指定中にもう一度押すと確定する。 |
-| `矢印キー`、`Shift`＋`矢印キー` | 画像の印の位置を指定中 | 照準を動かす。`Shift` を押しながら動かすと移動幅が10倍になる。 |
-| `Delete` または `Backspace` | 画像上の印 | フォーカスのあるピンや範囲を削除する。 |
-| `↓`・`↑`、`Home`・`End` | 「資料と保存のメニュー」 | メニューボタンで `↓`・`↑` を押すと開く。開いたら上下で項目を選び、`Home`・`End` で先頭・末尾に移る。`Tab` でメニューを閉じて先へ進む。 |
-| `Ctrl+C` | 「回答をコピー」の手動コピー画面 | 全文を選んでコピーすると管理番号と画像の座標も含まれる。一部を選ぶと選択した本文だけをコピーする。 |
 
 ## ライセンス
 
