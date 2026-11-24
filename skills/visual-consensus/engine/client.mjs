@@ -120,7 +120,7 @@ export async function start(installDemo = () => {}) {
     sources.innerHTML = Object.entries({local, disk}).map(([key, pack]) => `<label class="conflict-choice">
       <input type="radio" name="conflict-source" value="${key}" ${key === (newer ?? 'local') ? 'checked' : ''}>
       <span>${labels[key]}の回答 ${key === newer ? '<b class="conflict-new">新しい</b>' : ''}
-      <small>${time(savedAt[key])}・回答 ${counts(pack.answers).total} 件</small></span></label>`).join('');
+      <small>${time(savedAt[key])}・回答 ${model.progressCounts(pack.answers).total} 件</small></span></label>`).join('');
     const confirm = $('#conflict-keep');
     function showChoice() {
       confirm.value = $('input:checked', sources).value;
@@ -290,7 +290,7 @@ export async function start(installDemo = () => {}) {
     $('.nav-t', row).textContent = label;
     selector.querySelector(`option[value="${DRAFT_PAGE}"]`).textContent = label;
   }
-  // 判断のない作者のセクションは、一覧の丸を押して了承（OK）を付け外しする。
+  // 今回選ぶ判断がない作者のセクションは、一覧の丸を押して了承（OK）を付け外しする。
   // 追加したセクションは利用者が書いたセクションで、答える問いがないので丸を出さない。
   function navLink(s,user=false) {
     const mark=user ? '' : model.canApproveSection(s.id)
@@ -311,7 +311,7 @@ export async function start(installDemo = () => {}) {
     $('#next-section').disabled=selector.selectedIndex>=pages().length-1;
   }
   function progress(sectionId) {
-    const a=store.answers,p=counts(a, activeDecisions);
+    const a=store.answers,p=model.progressCounts(a);
     topbar.progress(p.chosen, activeDecisions.length, p.total, p.deferred);
     const generalNote = a.sections.general?.trim() && !a.archived?.[model.addresses.key('sections', 'general')];
     const requests = String(visibleRequests().length + Number(Boolean(generalNote)));
@@ -332,10 +332,11 @@ export async function start(installDemo = () => {}) {
         icon.className = 'm ' + state + (toggle ? ' ok' : '');
         icon.setAttribute('aria-label', label);
         icon.closest('.nav-item').dataset.tipSub = label;
-        if (toggle) icon.parentElement.dataset.tip = store.answers.approvedSections[section.id] === true ? 'OKを取り消す' : 'このセクションをOKにする';
         if (toggle) {
+          const approved = model.isSectionApproved(a, section.id);
+          icon.parentElement.dataset.tip = approved ? 'OKを取り消す' : 'このセクションをOKにする';
           icon.parentElement.dataset.tipSub = label;
-          icon.parentElement.setAttribute('aria-pressed', String(a.approvedSections[section.id] === true));
+          icon.parentElement.setAttribute('aria-pressed', String(approved));
         }
       }
     }
@@ -439,7 +440,7 @@ export async function start(installDemo = () => {}) {
     // 別の端末では、追加セクション・依頼・印の元データが保存先をつなぐまで届かない。
     if (!navigate(firstSection.id)) return;
     const origin = sheet().querySelector(`[data-see-reply="${address}"]`);
-    const excerpt = origin?.parentElement.querySelector('.reply-excerpt');
+    const excerpt = origin?.closest('li')?.querySelector('.reply-excerpt');
     if (excerpt) excerpt.textContent = model.threads(a, key).find(item => item.edition === doc.built.number).reply;
     reveal(origin);
     notify('元のコメントを表示するには、回答を保存したフォルダを選んでください。');
@@ -755,7 +756,7 @@ export async function start(installDemo = () => {}) {
     renderAttachments(page);
     for (const el of all('[data-field]', page)) renderSlot(el, force);
     for (const button of all('[data-approve-section]', page)) {
-      button.setAttribute('aria-pressed', String(store.answers.approvedSections[button.dataset.approveSection] === true));
+      button.setAttribute('aria-pressed', String(model.isSectionApproved(store.answers, button.dataset.approveSection)));
     }
     for (const el of all('[data-settled-answer]', page)) {
       const d = decisions.get(el.dataset.settledAnswer);
@@ -1057,7 +1058,7 @@ export async function start(installDemo = () => {}) {
     }
     if (f.approveSection) {
       const a = store.answers;
-      model.setSectionApproved(a, f.approveSection, a.approvedSections[f.approveSection] !== true);
+      model.setSectionApproved(a, f.approveSection, !model.isSectionApproved(a, f.approveSection));
       changed();
       return;
     }

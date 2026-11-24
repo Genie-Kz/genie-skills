@@ -11,6 +11,8 @@ const line = str => str.trim().replace(/\s*[\r\n\u2028\u2029]+\s*/g, ' ／ ');
 const record = o => o !== null && typeof o === 'object' && !Array.isArray(o);
 const fields = (o, keys) => record(o) && Object.keys(o).length === keys.length && keys.every(k => Object.hasOwn(o, k));
 const everyEntry = (o, test) => record(o) && Object.entries(o).every(([key, value]) => test(key, value));
+const validEdition = n => Number.isSafeInteger(n) && n > 0;
+const editionStamp = value => fields(value, ['at']) && validEdition(value.at);
 const text = v => typeof v === 'string' && v.length <= MAX_TEXT;
 const coord = n => Number.isFinite(n) && n >= 0 && n <= 1;
 export const pngData = s => typeof s === 'string' && /^data:image\/png;base64,iVBORw0KGgo[A-Za-z0-9+/]*={0,2}$/.test(s);
@@ -231,11 +233,12 @@ function openDecisions(definitions) {
   return definitions.decisions.filter(d => !d.settled && !closed.has(d.section));
 }
 
-/** chosen は未確定の問いのうち回答した数。total は確定後も保存する全回答の件数。 */
-export function counts(a, definitions) {
+/** chosen は未確定の問いのうち回答した数。保存履歴では全回答を数え、画面では現在も有効な了承だけを数える。 */
+export function counts(a, definitions, includeApproval = () => true) {
   const decisions = Object.values(a.decisions);
   const pins = Object.values(a.pins).reduce((sum, group) => sum + group.items.length, 0);
-  const other = ['photos','rows','mocks','sections','attachments','approvedSections'].reduce((sum, key) => sum + Object.keys(a[key]).length, 0);
+  const approvals = Object.keys(a.approvedSections).filter(id => includeApproval(a, id)).length;
+  const other = ['photos','rows','mocks','sections','attachments'].reduce((sum, key) => sum + Object.keys(a[key]).length, approvals);
   const open = definitions && openDecisions(definitions);
   const deferred = (open ? open.map(d => a.decisions[d.id]) : decisions).filter(decisionDeferred).length;
   const chosen = open ? open.filter(d => decisionAnswered(d, a.decisions[d.id])).length
@@ -517,9 +520,8 @@ export function answerModel(doc) {
   const activeDecisions = openDecisions(doc);
   const decisionsBySection = new Map(doc.sections.map(s => [s.id, []]));
   for (const d of activeDecisions) decisionsBySection.get(d.section)?.push(d);
-  // 決定事項へ移った判断も、作者の章を手動で了承できるかの判定には含める。
-  const sectionsWithDecisions = new Set(doc.decisions.map(d => d.section));
-  const canApproveSection = id => sectionMap.has(id) && !sectionsWithDecisions.has(id);
+  const canApproveSection = id => sectionMap.has(id) && !sectionMap.get(id).settled
+    && (decisionsBySection.get(id)?.length ?? 0) === 0;
   const issues = new Map(doc.issues.map(i => [i.id, i]));
   const rows = new Map(), mocks = new Map(), sectionFigures = new Map();
   for (const section of doc.sections) {
@@ -562,7 +564,12 @@ export function answerModel(doc) {
   }
 
   function recordEdition(a) {
-    if (!doc.built?.number) return;
+    if (!validEdition(doc.built?.number)) return;
+    // 別の欄への回答で旧形式の了承まで今回のものにならないよう、回答回を進める前に固定する。
+    // unpack が旧資料から回答回を復元できた場合もここに入る。時期不明の了承は第1回として扱う。
+    for (const [id, approval] of Object.entries(a.approvedSections)) {
+      if (approval === true) a.approvedSections[id] = {at: a.answeredEdition ?? 1};
+    }
     a.answeredEdition = doc.built.number;
     const keys = Object.keys(doc.replyEditions ?? {});
     if (!keys.length) return;
@@ -622,11 +629,37 @@ export function answerModel(doc) {
     };
   }
 
-  /** 対象は判断を持たない作者のセクション。取消は了承だけを消し、そのセクションに書いた回答を保持する。 */
+  /** 現在のページに判断がないとき、今回の了承を記録する。取り消してもコメントや画像は残す。 */
   function setSectionApproved(a, id, approved) {
     if (!canApproveSection(id) || typeof approved !== 'boolean') throw Error('セクションの了承を設定できません');
-    if (approved) a.approvedSections[id] = true;
+    if (approved) a.approvedSections[id] = validEdition(doc.built?.number) ? {at: doc.built.number} : true;
     else delete a.approvedSections[id];
+  }
+
+  /** そのセクションで、利用者がまだ完了にしていない返事・対応のうち最新の回を返す。該当なしは 0。 */
+  function sectionAttentionEdition(a, id) {
+    let latest = 0;
+    for (const editions of [doc.replyEditions, doc.resolvedEditions]) {
+      for (const [rawKey, edition] of Object.entries(editions ?? {})) {
+        if (!validEdition(edition) || edition <= latest) continue;
+        const {key, page, owner} = replyLocation(a, rawKey);
+        if (page !== id && owner !== id) continue;
+        // 印や表の項目には親の宛先があり、依頼には一覧の表示先とは別に対象セクションがある。
+        const base = key.split('　')[0];
+        const parent = addresses.key('sections', owner ?? page);
+        if (!a.archived?.[key] && !a.archived?.[base] && !a.archived?.[parent]) latest = edition;
+      }
+    }
+    return latest;
+  }
+
+  /** 保存された了承が、現在のページと未完了の返事・対応にも有効かを返す。 */
+  function isSectionApproved(a, id) {
+    const stamp = a.approvedSections[id];
+    if (!stamp || !canApproveSection(id)) return false;
+    if (!validEdition(doc.built?.number)) return true;
+    const approvedAt = stamp === true ? a.answeredEdition ?? 1 : stamp.at;
+    return sectionAttentionEdition(a, id) <= approvedAt;
   }
 
   const hasSection = (a, id) => sectionMap.has(id) || a.userSections.some(s => s.id === id);
@@ -673,8 +706,7 @@ export function answerModel(doc) {
       delete a.answeredEdition;
     }
     if (Object.hasOwn(a, 'archived')) {
-      if (!everyEntry(a.archived, (key, value) => validReplyKey(key) && fields(value, ['at'])
-          && Number.isSafeInteger(value.at) && value.at > 0)) throw Error('項目を完了した回の番号を確認してください');
+      if (!everyEntry(a.archived, (key, value) => validReplyKey(key) && editionStamp(value))) throw Error('項目を完了した回の番号を確認してください');
       if (a.archived[WHOLE]) {
         const publicEntry = a.archived[WHOLE], oldEntry = a.archived[generalAddress];
         a.archived[generalAddress] = oldEntry && oldEntry.at < publicEntry.at ? oldEntry : publicEntry;
@@ -757,7 +789,7 @@ export function answerModel(doc) {
       && everyEntry(a.mocks, (id, v) => mocks.has(id) && text(v))
       && everyEntry(a.rows, (id, v) => rows.has(id) && text(v))
       && everyEntry(a.sections, (id, v) => (id === 'general' || hasSection(a,id)) && text(v))
-      && everyEntry(a.approvedSections, (id, value) => canApproveSection(id) && value === true);
+      && everyEntry(a.approvedSections, (id, value) => sectionMap.has(id) && (value === true || editionStamp(value)));
     if (!valid) throw Error('回答の項目・画像・座標を読み取れません');
     if (!metadata.answeredEdition && doc.built?.legacyAnsweredEdition && (counts(a).total || metadata.itemComments)) {
       metadata.answeredEdition = doc.built.legacyAnsweredEdition;
@@ -777,7 +809,7 @@ export function answerModel(doc) {
       if (held.length) return {state:'hold', label:`判断 ${chosen}/${own.length}・保留 ${held.length}`};
       if (chosen === own.length) return {state:'done', label:'判断済み・コメントのない行は了承'};
       if (chosen) return {state:'part', label:`判断 ${chosen}/${own.length}`};
-    } else if (canApproveSection(id) && a.approvedSections[id] === true) {
+    } else if (isSectionApproved(a, id)) {
       return {state:'done', label:'OK済み'};
     }
 
@@ -925,7 +957,7 @@ export function answerModel(doc) {
     // 元のコメントを空にした後でも、返事とその下の追記には宛先を付けて渡す。
     for (const s of doc.sections) {
       const key = addresses.key('sections', s.id);
-      if (!s.settled && !a.sections[s.id]?.trim() && !a.approvedSections[s.id] && threads(a, key).length) append(s.id, key, 'セクション「' + line(s.title) + '」');
+      if (!s.settled && !a.sections[s.id]?.trim() && threads(a, key).length && !isSectionApproved(a, s.id)) append(s.id, key, 'セクション「' + line(s.title) + '」');
       for (const r of s.rows) {
         const candidates = [['rows', r.id, '行「' + line(r.title) + '」'], ...r.mocks.map(id => ['mocks', id, '画面案「' + line(r.mockTitles?.[id] ?? r.title) + '」'])];
         for (const [kind, id, label] of candidates) {
@@ -1023,7 +1055,8 @@ export function answerModel(doc) {
       if (state === 'empty' && !entries.has(s.id) && !decisions.some(d => threads(a, addresses.key('decisions', d.id)).length
           || d.items?.some(item => threads(a, addresses.key('itemComments', d.id + '　' + item.id)).length))) {
         const indexOnly = !decisions.length && s.rows.length > 0 && s.rows.every(row => row.type === 'decisions');
-        if (!indexOnly) untouched.push('- ' + line(s.title));
+        // 判断一覧だけのページでも、そのページに新しい対応があれば確認対象として残す。
+        if (!indexOnly || sectionAttentionEdition(a, s.id) > 0) untouched.push('- ' + line(s.title));
         continue;
       }
       const lines = [];
@@ -1118,5 +1151,6 @@ export function answerModel(doc) {
   return {empty, unpack, markdown, picture, figuresInSection, sectionTitle, targetLabel, saveRequest, submitDraft,
     activeDecisions, addresses, threads, replyLocation, recordEdition, followUp, settledSummary, setItemComment, setArchived, resolvedLabel,
     filedTitle, archivedItems: a => reviewDocument(a, {preview: true}).filed,
-    canApproveSection, setSectionApproved, sectionProgress, sectionState};
+    canApproveSection, setSectionApproved, isSectionApproved, sectionAttentionEdition, sectionProgress, sectionState,
+    progressCounts: a => counts(a, activeDecisions, isSectionApproved)};
 }

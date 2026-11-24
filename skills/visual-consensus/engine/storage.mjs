@@ -495,11 +495,11 @@ export function createStorage(doc, model, {status, replaced, conflict, notify, a
     scheduleAnswerSave();
   }
 
-  /** 保存付きの一括入力。後続の編集がない取り消しでは、初回の回答版と返事の記録も入力前へ戻す。 */
+  /** 一括入力を直後に取り消すと、回答回・返事・旧形式の了承も入力前の保存内容に戻る。 */
   function fillRecommendations() {
     const answers = store.answers;
     const history = {};
-    for (const key of ['answeredEdition', 'threads']) {
+    for (const key of ['answeredEdition', 'threads', 'approvedSections']) {
       if (Object.hasOwn(answers, key)) history[key] = structuredClone(answers[key]);
     }
     const fill = fillRecommended(answers, model.activeDecisions);

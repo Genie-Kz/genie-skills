@@ -98,8 +98,8 @@ export function showEditionReplies(host, doc, model, answers) {
     const text = reply.trim(), firstLine = text.split(/\r\n?|\n/, 1)[0];
     const head = Array.from(firstLine).slice(0, 80).join('');
     const excerpt = head === text ? head : head + '…';
-    return `<li><svg class="icon" aria-hidden="true"><use href="#vc-icon-reply"/></svg>
-      <span><span class="reply-origin">${esc(label)} →</span> <span class="reply-excerpt">${esc(excerpt)}</span> <button type="button" class="text-button" data-see-reply="${esc(key)}">見る</button></span></li>`;
+    return `<li><button type="button" class="reply-jump" data-see-reply="${esc(key)}" aria-label="${esc(label)}の返事へ移動" data-tip="該当箇所へ移動"><svg class="icon" aria-hidden="true"><use href="#vc-icon-reply"/></svg></button>
+      <span class="reply-summary"><span class="reply-origin">${esc(label)}</span> <span class="reply-sep" aria-hidden="true">→</span> <span class="reply-excerpt">${esc(excerpt)}</span></span></li>`;
   });
   const html = `<h2>この回の返事（${items.size}件）</h2><ul>${rows.join('')}</ul>`;
   if (host._contents !== html) { host.innerHTML = html; host._contents = html; }
