@@ -49,7 +49,11 @@ function drawMarks(ctx, marks) {
     ctx.arc(cx, cy, radius - unit, 0, 2 * Math.PI);
     ctx.fillStyle = blue;
     ctx.fill();
-    ctx.strokeStyle = theme.getPropertyValue('--sheet');
+    ctx.strokeStyle = 'rgba(1, 4, 9, 0.75)';
+    ctx.lineWidth = 3.5 * unit;
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2 * unit;
     ctx.stroke();
     ctx.fillStyle = '#fff';
     ctx.fillText(String(mark.number), cx, cy, 16 * unit);
@@ -274,6 +278,21 @@ function photoViewport(stage, canvas, {cancelMark, placing, changed, positionPop
       const center = stageCenter();
       transform(center, center, next);
     },
+    panBy(dx, dy) {
+      if (scale <= 1) return false;
+      const center = stageCenter();
+      transform(center, {x: center.x + dx, y: center.y + dy}, scale);
+      return true;
+    },
+    focusMark(mark) {
+      if (scale <= 1 || !mark) return;
+      const rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const nx = isRange(mark) ? mark.x + mark.w / 2 : mark.x;
+      const ny = isRange(mark) ? mark.y + mark.h / 2 : mark.y;
+      const from = {x: rect.left + nx * rect.width, y: rect.top + ny * rect.height};
+      transform(from, stageCenter(), scale);
+    },
     clamp() {
       const center = stageCenter();
       transform(center, center, scale);
@@ -293,18 +312,21 @@ function photoViewport(stage, canvas, {cancelMark, placing, changed, positionPop
 /** 画像だけを囲む枠を座標系とする。余白・見出し・縮尺を変えても同じ位置を指す。
  * 返した関数に印の番号を渡すと、その印の編集を開く。最後の edit を false にすると対応済みの要約から開く。 */
 export function photoViewer(store, changed, describe, hooks) {
-  const modal = make('dialog','photo-zoom rv-dialog rv-fullscreen rv-ui');
+  const modal = make('dialog','photo-zoom rv-dialog rv-ui');
   modal.setAttribute('aria-labelledby','rv-photo-title');
   modal.innerHTML = '<header><h2 id="rv-photo-title"></h2>'
     +'<div class="rv-header-actions">'
+    +'<button type="button" class="rv-icon-btn" data-undo-marks aria-label="元に戻す" data-tip="元に戻す" disabled><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-undo"/></svg></button>'
+    +'<button type="button" class="rv-icon-btn" data-redo-marks aria-label="やり直す" data-tip="やり直す" disabled><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-redo"/></svg></button>'
+    +'<span class="rv-action-sep" aria-hidden="true"></span>'
     +'<div class="rv-zoom-controls" role="group" aria-label="表示倍率">'
     +'<button type="button" data-zoom-out aria-label="縮小" data-tip="縮小">−</button>'
     +'<button type="button" data-zoom-reset aria-label="表示倍率を100%に戻す" data-tip="100%に戻す">100%</button>'
     +'<button type="button" data-zoom-in aria-label="拡大" data-tip="拡大">＋</button>'
     +'</div>'
-    +'<button type="button" data-pan-toggle aria-pressed="false" data-tip="拡大中にドラッグで画像を移動" disabled>移動</button>'
-    +'<button type="button" data-fullscreen-toggle aria-pressed="true" data-tip="標準サイズに切り替える">標準サイズ</button>'
-    +'<button type="button" data-close>閉じる</button></div></header>'
+    +'<button type="button" class="rv-icon-btn" data-pan-toggle aria-pressed="false" aria-label="ドラッグで画像を移動" data-tip="ドラッグで画像を移動" disabled><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-hand"/></svg></button>'
+    +'<button type="button" class="rv-icon-btn" data-fullscreen-toggle aria-pressed="false" aria-label="全画面表示" data-tip="全画面表示"><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-fullscreen"/></svg></button>'
+    +'<button type="button" class="rv-icon-btn rv-close" data-close aria-label="閉じる" data-tip="閉じる"><svg class="icon" aria-hidden="true"><use href="#vc-icon-x"/></svg></button></div></header>'
     +'<div class="rv-body"><div class="rv-workspace">'
     +'<div class="rv-stage"><div class="rv-canvas" tabindex="0"><img alt="" draggable="false"></div></div>'
     +'<div class="rv-pin-tools"><span class="rv-pin-hint" role="status"></span><button type="button" data-cancel hidden>取り消す</button></div>'
@@ -319,6 +341,8 @@ export function photoViewer(store, changed, describe, hooks) {
   const cancel = modal.querySelector('[data-cancel]'), hint = modal.querySelector('.rv-pin-hint'), list = modal.querySelector('ol');
   const pop = modal.querySelector('.rv-pop');
   const description = modal.querySelector('[data-photo-description]');
+  const undoBtn = modal.querySelector('[data-undo-marks]');
+  const redoBtn = modal.querySelector('[data-redo-marks]');
   const zoomOutBtn = modal.querySelector('[data-zoom-out]');
   const zoomResetBtn = modal.querySelector('[data-zoom-reset]');
   const zoomInBtn = modal.querySelector('[data-zoom-in]');
@@ -340,7 +364,7 @@ export function photoViewer(store, changed, describe, hooks) {
     const instruction = touch && zoomed ? 'タップでピン、なぞると画像を移動できます。'
       : !touch && panMode ? 'ドラッグで画像を移動できます。' : markHint;
     const zoomNote = touch ? '2本指で広げる・縮めると倍率を変えられます。' : 'ホイールや右上のボタンで拡大・縮小できます。';
-    idleHint = instruction + zoomNote + '印を押すと一言を書けます。移動と削除は一覧で行えます。';
+    idleHint = instruction + zoomNote + '印を押すと一言を書けます。削除は一覧で行えます。';
     canvas.setAttribute('aria-label', '画像。' + instruction + 'Enterでキーボードからピンを立てる');
     if (!armed) hint.textContent = idleHint;
   }
@@ -348,12 +372,15 @@ export function photoViewer(store, changed, describe, hooks) {
   function setFullscreen(on) {
     modal.classList.toggle('rv-fullscreen', on);
     fullscreenToggle.setAttribute('aria-pressed', String(on));
-    fullscreenToggle.textContent = on ? '標準サイズ' : '全画面';
-    fullscreenToggle.dataset.tip = on ? '標準サイズに切り替える' : '全画面で広く表示する';
+    const label = on ? '標準サイズに戻す' : '全画面表示';
+    fullscreenToggle.setAttribute('aria-label', label);
+    fullscreenToggle.dataset.tip = label;
+    fullscreenToggle.querySelector('use').setAttribute('href', on ? '#vc-icon-exit-fullscreen' : '#vc-icon-fullscreen');
     if (modal.open) requestAnimationFrame(() => viewport.clamp());
   }
 
-  let key, armed = false, moving = null, cursor = null, popMark = null, drag = null;
+  let key, armed = false, cursor = null, popMark = null, drag = null, pinDrag = null, suppressPinClick = null;
+  let undoStack = [], redoStack = [], pendingFreshUndo = false;
   const viewport = photoViewport(stage, canvas, {
     cancelMark() { drag?.box?.remove(); drag = null; },
     placing: () => armed,
@@ -361,12 +388,72 @@ export function photoViewer(store, changed, describe, hooks) {
     positionPop,
   });
   updateViewportUI({scale: 1, panMode: false});
+  const group = () => store.answers.pins[key];
+
+  function snapshotMarks() {
+    const g = group();
+    if (!g) return null;
+    return {next: g.next, items: g.items.map(item => ({...item}))};
+  }
+
+  function applyMarksSnapshot(snap) {
+    if (snap) store.answers.pins[key] = {next: snap.next, items: snap.items.map(item => ({...item}))};
+    else delete store.answers.pins[key];
+  }
+
+  function syncHistoryButtons() {
+    undoBtn.disabled = undoStack.length === 0;
+    redoBtn.disabled = redoStack.length === 0;
+  }
+
+  function clearHistory() {
+    undoStack = [];
+    redoStack = [];
+    pendingFreshUndo = false;
+    syncHistoryButtons();
+  }
+
+  function pushHistory(beforeSnap) {
+    undoStack.push(beforeSnap);
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack = [];
+    syncHistoryButtons();
+  }
+
+  function undoMarks() {
+    if (!undoStack.length) return;
+    closePop();
+    redoStack.push(snapshotMarks());
+    const previous = undoStack.pop();
+    applyMarksSnapshot(previous);
+    arm(false);
+    changed();
+    render();
+    syncHistoryButtons();
+    hint.textContent = '直前の印の操作を元に戻しました。';
+  }
+
+  function redoMarks() {
+    if (!redoStack.length) return;
+    closePop();
+    undoStack.push(snapshotMarks());
+    const next = redoStack.pop();
+    applyMarksSnapshot(next);
+    arm(false);
+    changed();
+    render();
+    syncHistoryButtons();
+    hint.textContent = '取り消した印の操作をやり直しました。';
+  }
+
+  undoBtn.onclick = undoMarks;
+  redoBtn.onclick = redoMarks;
   zoomOutBtn.onclick = () => viewport.zoomByStep(-1);
   zoomInBtn.onclick = () => viewport.zoomByStep(1);
   zoomResetBtn.onclick = () => viewport.reset();
   panToggle.onclick = () => viewport.setPanMode(!viewport.isPanMode());
   fullscreenToggle.onclick = () => setFullscreen(!modal.classList.contains('rv-fullscreen'));
-  const group = () => store.answers.pins[key];
+
   function summary(button,mark) {
     const badge=make('em'), words=make('span');
     badge.textContent=markName(mark);
@@ -375,24 +462,28 @@ export function photoViewer(store, changed, describe, hooks) {
   }
   const badgeOf = n => canvas.querySelector('button.rv-pin[data-n="'+n+'"]');
 
+  function highlightMark(number) {
+    canvas.querySelectorAll('.rv-mark.rv-hover').forEach(el => el.classList.remove('rv-hover'));
+    list.querySelectorAll('li.rv-hover').forEach(el => el.classList.remove('rv-hover'));
+    if (number == null) return;
+    badgeOf(number)?.closest('.rv-mark')?.classList.add('rv-hover');
+    list.querySelector(`[data-show-mark="${number}"]`)?.closest('li')?.classList.add('rv-hover');
+  }
 
   function point(event) {
     const r = image.getBoundingClientRect();
     return {x:fraction((event.clientX-r.left)/r.width), y:fraction((event.clientY-r.top)/r.height), px:event.clientX, py:event.clientY};
   }
 
-  /** 位置を変えるときと、キーボードで置くときだけ照準を出す。 */
-  function arm(on, mark = null) {
+  /** キーボードでピンを置くときだけ照準を出す。 */
+  function arm(on) {
     if (on) { closePop(); viewport.setPanMode(false); }
-    armed = on; moving = mark; cursor?.remove(); cursor = null;
+    armed = on; cursor?.remove(); cursor = null;
     modal.classList.toggle('rv-placing', on);
     cancel.hidden = !on;
-    hint.textContent = !on ? idleHint
-      : mark && isRange(mark) ? markName(mark) + (touch ? 'の新しい位置をタップ。なぞると範囲を描き直せます。' : 'の新しい位置をクリック。ドラッグすると範囲を描き直せます。')
-      : mark ? markName(mark)+'の新しい位置を選んでください。'
-      : 'ピンを置く位置を選んでください。';
+    hint.textContent = !on ? idleHint : 'ピンを置く位置を選んでください。';
     if (on) {
-      cursor = marker({number:mark?.number ?? '+', x:mark?.x ?? 0.5, y:mark?.y ?? 0.5},false);
+      cursor = marker({number:'+', x:0.5, y:0.5},false);
       cursor.classList.add('rv-cursor'); canvas.append(cursor);
       canvas.focus({preventScroll:true});
     }
@@ -413,10 +504,23 @@ export function photoViewer(store, changed, describe, hooks) {
     hooks.markThread(conversation, key, mark);
 
     const fold = conversation.querySelector('.resolved-item');
+    function discardFreshMark() {
+      // 置いた直後のキャンセルは履歴を汚さずに配置前へ戻す。
+      if (pendingFreshUndo && undoStack.length) {
+        const before = undoStack.pop();
+        pendingFreshUndo = false;
+        closePop();
+        applyMarksSnapshot(before);
+        arm(false); changed(); render(); syncHistoryButtons();
+        canvas.focus({preventScroll: true});
+        return;
+      }
+      remove(mark, {recordHistory: false, announce: false});
+    }
     function editComment() {
       hooks.editPin(conversation.querySelector('[data-pop-text]'), key, mark,
         () => { closePop(); hooks.refresh(); canvas.focus({preventScroll: true}); }, cursor,
-        () => summary(list.querySelector(`[data-show-mark="${mark.number}"]`), mark), fresh ? () => remove(mark) : null);
+        () => summary(list.querySelector(`[data-show-mark="${mark.number}"]`), mark), fresh ? discardFreshMark : null);
     }
     // 印からは要約を開き、元のコメントや下書きから来た場合はそのまま編集を続ける。
     if (fold && !edit) {
@@ -452,6 +556,7 @@ export function photoViewer(store, changed, describe, hooks) {
 
   }
   function closePop() {
+    pendingFreshUndo = false;
     if (popMark) hooks.leavePin(key,popMark.number);
     list.querySelector('.editing-mark')?.classList.remove('editing-mark');
     popMark = null; pop.hidden = true;
@@ -459,48 +564,99 @@ export function photoViewer(store, changed, describe, hooks) {
     if (modal.open) hooks.opened(key,null);
     canvas.querySelectorAll('.rv-active').forEach(el => el.classList.remove('rv-active'));
   }
-  function remove(mark) {
+  function remove(mark, {recordHistory = true, announce = true} = {}) {
+    if (recordHistory) pushHistory(snapshotMarks());
     arm(false); closePop();
-    group().items = group().items.filter(p => p.number !== mark.number);
+    const g = group();
+    if (g) g.items = g.items.filter(p => p.number !== mark.number);
     changed(); render(); canvas.focus({preventScroll:true});
+    if (announce) hint.textContent = markName(mark) + 'を削除しました。元に戻すボタンで復元できます。';
   }
   new ResizeObserver(positionPop).observe(pop);
   new ResizeObserver(() => { if (modal.open) viewport.clamp(); }).observe(stage);
 
 
   function render() {
+    highlightMark(null);
     canvas.querySelectorAll('.rv-mark:not(.rv-cursor)').forEach(el => el.remove());
     list.replaceChildren();
     for (const mark of group()?.items ?? []) {
       if (!hooks.markVisible(key, mark)) continue;
       const el = marker(mark,true), badge = el.matches('button') ? el : el.querySelector('button');
       badge.dataset.n = mark.number;
-      badge.onpointerdown = event => event.stopPropagation();
-      badge.onclick = event => { event.stopPropagation(); popMark === mark ? closePop() : openPop(mark); };
+      badge.onpointerenter = () => highlightMark(mark.number);
+      badge.onpointerleave = () => highlightMark(null);
+      badge.onfocus = () => highlightMark(mark.number);
+      badge.onblur = () => highlightMark(null);
+      badge.onpointerdown = event => {
+        event.stopPropagation();
+        // ピンは 6px 以上ドラッグしたときだけ直接位置を調整し、短いクリックは一言編集を開く。
+        if (isRange(mark) || event.button !== 0 || armed || viewport.isPanMode()) return;
+        pinDrag = {mark, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+          moved: false, beforeSnap: null, origX: mark.x, origY: mark.y};
+        badge.setPointerCapture(event.pointerId);
+      };
+      badge.onpointermove = event => {
+        if (!pinDrag || pinDrag.pointerId !== event.pointerId || pinDrag.mark !== mark) return;
+        if (!pinDrag.moved) {
+          if (Math.hypot(event.clientX - pinDrag.startX, event.clientY - pinDrag.startY) < 6) return;
+          pinDrag.moved = true;
+          pinDrag.beforeSnap = snapshotMarks();
+          closePop();
+          badge.classList.add('rv-dragging');
+        }
+        const pt = point(event);
+        mark.x = pt.x; mark.y = pt.y;
+        badge.style.left = pct(pt.x); badge.style.top = pct(pt.y);
+        event.preventDefault();
+      };
+      const finishPinDrag = event => {
+        if (!pinDrag || pinDrag.pointerId !== event.pointerId || pinDrag.mark !== mark) return;
+        const d = pinDrag; pinDrag = null;
+        badge.classList.remove('rv-dragging');
+        if (!d.moved) return;
+        if (event.type === 'pointercancel') {
+          mark.x = d.origX; mark.y = d.origY;
+          render();
+          return;
+        }
+        suppressPinClick = mark.number;
+        pushHistory(d.beforeSnap);
+        changed(); render();
+      };
+      badge.onpointerup = finishPinDrag;
+      badge.onpointercancel = finishPinDrag;
+      badge.onclick = event => {
+        event.stopPropagation();
+        if (suppressPinClick === mark.number) { suppressPinClick = null; return; }
+        popMark === mark ? closePop() : openPop(mark);
+      };
       badge.onkeydown = event => { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(mark); } };
       canvas.append(el);
       const item = make('li');
+      item.onpointerenter = () => highlightMark(mark.number);
+      item.onpointerleave = () => highlightMark(null);
+      item.onfocusin = () => highlightMark(mark.number);
+      item.onfocusout = () => highlightMark(null);
       const button = make('button', 'mk rv-pin-summary');
       button.type = 'button';
       button.dataset.showMark = mark.number;
       summary(button,mark);
       button.onclick = () => {
         arm(false);
+        viewport.focusMark(mark);
         badge.scrollIntoView({block:'nearest'});
         openPop(mark, undefined, true);
       };
       const comment = make('div', 'review-comment');
       const actions = make('span', 'mark-actions');
-      const move = make('button', 'text-button'), erase = make('button', 'text-button');
-      move.type = erase.type = 'button';
-      move.dataset.moveMark = erase.dataset.deleteMark = mark.number;
-      move.textContent = '移動';
+      const erase = make('button', 'text-button');
+      erase.type = 'button';
+      erase.dataset.deleteMark = mark.number;
       erase.textContent = '削除';
-      move.setAttribute('aria-label', markName(mark) + 'を移動');
       erase.setAttribute('aria-label', markName(mark) + 'を削除');
-      move.onclick = () => { arm(true, mark); badge.scrollIntoView({block: 'nearest'}); };
       erase.onclick = () => remove(mark);
-      actions.append(move, erase);
+      actions.append(erase);
       comment.append(button, actions);
       item.append(comment);
       hooks.markThread(item, key, mark);
@@ -508,26 +664,24 @@ export function photoViewer(store, changed, describe, hooks) {
     }
   }
 
-  /** 点を置く。range があれば範囲として置く。移動中の印は、点なら移し、範囲なら大きさを保って中心を移す。 */
+  /** 点を置く。range があれば範囲として置く。 */
   function put(x, y, range = null) {
+    const beforeSnap = snapshotMarks();
     const g = store.answers.pins[key] ??= {next:1, items:[]};
     // 新しい印は、今ある印の最大の番号の次にする。末尾の印を消して置き直すと、同じ番号に戻る。
     let number = g.items.reduce((top, p) => Math.max(top, p.number), 0) + 1;
     // 返事が付いた番号は、新しい別の印にその会話を引き継がせない。
     while (hooks.hasMarkReply(key, number)) number++;
-    if (!moving && number >= Number.MAX_SAFE_INTEGER) { arm(false); hint.textContent='この画像の印の番号を使い切りました。'; return; }
-    if (!moving && g.items.length >= MAX_PINS) { arm(false); hint.textContent='この画像には100件まで印を置けます。'; return; }
-    const fresh = !moving;
-    let mark = moving;
-    if (!mark) {
-      mark = range ? {number, x:0, y:0, w:0, h:0, comment:''} : {number, x:0, y:0, comment:''};
-      g.next = Math.max(g.next, number + 1);
-      g.items.push(mark);
-    }
+    if (number >= Number.MAX_SAFE_INTEGER) { arm(false); hint.textContent='この画像の印の番号を使い切りました。'; return; }
+    if (g.items.length >= MAX_PINS) { arm(false); hint.textContent='この画像には100件まで印を置けます。'; return; }
+    const mark = range ? {number, x:0, y:0, w:0, h:0, comment:''} : {number, x:0, y:0, comment:''};
+    g.next = Math.max(g.next, number + 1);
+    g.items.push(mark);
     if (isRange(mark) && range) Object.assign(mark, range);
-    else if (isRange(mark)) { mark.x = fraction(Math.min(1-mark.w, Math.max(0, x-mark.w/2))); mark.y = fraction(Math.min(1-mark.h, Math.max(0, y-mark.h/2))); }
     else { mark.x = x; mark.y = y; }
-    arm(false); changed(); render(); openPop(mark, undefined, true, fresh);
+    pushHistory(beforeSnap);
+    pendingFreshUndo = true;
+    arm(false); changed(); render(); openPop(mark, undefined, true, true);
   }
 
   cancel.onclick = () => arm(false);
@@ -550,8 +704,8 @@ export function photoViewer(store, changed, describe, hooks) {
     if (!drag) return;
     const {start, box, range} = drag; drag = null;
     box?.remove();
-    // 移動中のピンは点のまま扱う。小さすぎる四角はクリックとみなす。
-    if (range && range.w > 0.01 && range.h > 0.01 && !(moving && !isRange(moving))) put(range.x, range.y, range);
+    // 小さすぎる四角はクリックとみなす。
+    if (range && range.w > 0.01 && range.h > 0.01) put(range.x, range.y, range);
     else { const end = point(event); put(range ? end.x : start.x, range ? end.y : start.y); }
   };
   canvas.onpointercancel = () => { drag?.box?.remove(); drag = null; };
@@ -563,7 +717,7 @@ export function photoViewer(store, changed, describe, hooks) {
     let x=parseFloat(cursor.style.left)/100, y=parseFloat(cursor.style.top)/100;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      if (moving && isRange(moving)) put(x+moving.w/2, y+moving.h/2); else put(x,y);
+      put(x,y);
       return;
     }
     const step = event.shiftKey ? 0.1 : 0.01;
@@ -574,7 +728,7 @@ export function photoViewer(store, changed, describe, hooks) {
     cursor.style.top = pct(fraction(y+(dy[event.key] ?? 0)));
   };
   modal.querySelector('[data-close]').onclick=()=>modal.close();
-  modal.addEventListener('close',()=>{ viewport.setSpacePan(false); arm(false); closePop(); hooks.closed(); hooks.refresh(); });
+  modal.addEventListener('close',()=>{ viewport.setSpacePan(false); arm(false); closePop(); highlightMark(null); clearHistory(); hooks.closed(); hooks.refresh(); });
   // Edge の連続した Escape は、取り消せない dialog.cancel になる場合がある。
   // 内側の編集を閉じるキーは dialog の既定動作より先に扱う。
   modal.addEventListener('keydown', event => {
@@ -587,6 +741,22 @@ export function photoViewer(store, changed, describe, hooks) {
       return;
     }
     if (event.target.closest('input, textarea, [contenteditable]')) return;
+
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      const k = event.key.toLowerCase();
+      if (k === 'z' && !event.shiftKey) { event.preventDefault(); undoMarks(); return; }
+      if ((k === 'y' && !event.shiftKey) || (k === 'z' && event.shiftKey)) { event.preventDefault(); redoMarks(); return; }
+    }
+
+    if (!armed && viewport.getScale() > 1 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) {
+      const step = event.shiftKey ? 140 : 48;
+      const dx = event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0;
+      const dy = event.key === 'ArrowUp' ? step : event.key === 'ArrowDown' ? -step : 0;
+      event.preventDefault();
+      viewport.panBy(dx, dy);
+      return;
+    }
+
     if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
       event.preventDefault(); viewport.zoomByStep(1);
     } else if (event.key === '-' || event.code === 'NumpadSubtract') {
@@ -616,8 +786,9 @@ export function photoViewer(store, changed, describe, hooks) {
   };
   return (id,src,alt,number,cursor,edit = true,fresh = false) => {
     key=id;
-    setFullscreen(true);
+    setFullscreen(false);
     viewport.reset();
+    clearHistory();
     const picture = describe(store.answers,id);
     const isIssue=picture.issue===true;
     const attachment = store.answers.attachments[id];

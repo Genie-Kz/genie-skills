@@ -24,6 +24,11 @@
     <symbol id="vc-icon-chevron" viewBox="0 0 16 16"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></symbol>
     <symbol id="vc-icon-reply" viewBox="0 0 16 16"><path d="M6.78 1.97a.75.75 0 0 1 0 1.06L3.81 6h6.44A4.75 4.75 0 0 1 15 10.75v2.5a.75.75 0 0 1-1.5 0v-2.5a3.25 3.25 0 0 0-3.25-3.25H3.81l2.97 2.97a.75.75 0 1 1-1.06 1.06L1.47 7.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0Z"/></symbol>
     <symbol id="vc-icon-expand" viewBox="0 0 16 16"><path d="M8 2h6v6h-1.5V4.56l-7.22 7.22-1.06-1.06 7.22-7.22H8zM2 4h4v1.5H3.5v7h7V10H12v4H2z"/></symbol>
+    <symbol id="vc-icon-undo" viewBox="0 0 16 16"><path d="M5.5 4.5 2.5 7.5l3 3M2.5 7.5h7a3.5 3.5 0 1 1 0 7H8" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="vc-icon-redo" viewBox="0 0 16 16"><path d="m10.5 4.5 3 3-3 3M13.5 7.5h-7a3.5 3.5 0 1 0 0 7H8" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="vc-icon-hand" viewBox="0 0 16 16"><path d="M8 2.2v5.3M5.8 3.2v4.8M10.2 3.2v4.8M12.3 5.2v3.6c0 2.7-1.7 5-4.3 5-2.1 0-3.5-1.2-4.6-3.1l-1-1.9a1.1 1.1 0 0 1 1.8-1.2l1.6 1.4V3.2" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="vc-icon-fullscreen" viewBox="0 0 16 16"><path d="M10 2.5h3.5V6M13.5 2.5 9.5 6.5M6 13.5H2.5V10M2.5 13.5l4-4" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="vc-icon-exit-fullscreen" viewBox="0 0 16 16"><path d="M9.5 6.5H13M9.5 6.5V3M9.5 6.5l4-4M6.5 9.5H3M6.5 9.5V13M6.5 9.5l-4 4" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   </defs></svg>
   <header class="topbar">
     <div class="breadcrumb">
@@ -53,6 +58,7 @@
   <nav class="rail" aria-label="セクション">
     <div class="nav">
       <div class="nav-group"><span>セクション</span><span class="count" id="progress"></span></div>
+      <div class="nav-progress" id="nav-progress" hidden aria-hidden="true"><div class="nav-progress-bar" id="nav-progress-bar"></div></div>
       <div id="links"></div>
       <div class="nav-group"><span>追加したセクション</span><button type="button" class="icon-btn" data-new-section aria-label="新しいセクションを追加" data-tip="新しいセクションを追加"><svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/></svg></button></div>
       <div id="user-links"></div><p class="nav-empty" id="user-empty">まだありません</p>

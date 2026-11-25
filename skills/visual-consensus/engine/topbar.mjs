@@ -95,6 +95,13 @@ export function mountTopbar(doc, {answersPath, save, choose, notify, switchEditi
       mobile.hidden = !deferred;
     }
     if (meta.textContent !== label) meta.textContent = label;
+
+    const barWrap = element('nav-progress'), bar = element('nav-progress-bar');
+    if (barWrap && bar) {
+      barWrap.hidden = total === 0;
+      const pct = total ? Math.min(100, Math.round(chosen / total * 100)) : 0;
+      bar.style.width = pct + '%';
+    }
   }
 
   let lastStatus;

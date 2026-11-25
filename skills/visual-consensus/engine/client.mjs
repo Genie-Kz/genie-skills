@@ -171,11 +171,12 @@ export async function start(installDemo = () => {}) {
     const isGeneral=id==='general';
     const approval = model.canApproveSection(id)
       ? `<button type="button" class="opt" data-approve-section="${id}" aria-pressed="false">このセクションはOK</button>` : '';
+    const nextButton = isGeneral ? '' : '<button type="button" class="tail-next" data-next-section hidden></button>';
     const saved = `<div data-attachments="${id}"></div>${slot('sections', id)}<div data-section-requests="${id}"></div>`;
-    if (user) return `<footer class="section-tail" data-scope="${id}">${saved}<div class="tail-bar"><button type="button" class="text-button" data-delete-section>セクションを削除</button></div></footer>`;
+    if (user) return `<footer class="section-tail" data-scope="${id}">${saved}<div class="tail-bar"><button type="button" class="text-button" data-delete-section>セクションを削除</button>${nextButton}</div></footer>`;
     return `<footer class="section-tail" data-scope="${id}">
       ${saved}
-      <div class="tail-bar"><button type="button" class="section-comment text-button" data-write="sections:${id}">${isGeneral ? '全体にコメント' : 'このセクションにコメント'}</button>${approval}</div></footer>`;
+      <div class="tail-bar"><button type="button" class="section-comment text-button" data-write="sections:${id}">${isGeneral ? '全体にコメント' : 'このセクションにコメント'}</button>${approval}${nextButton}</div></footer>`;
   }
   // 軽い枠を原稿順に置き、本文は初めて表示する時に入れる。印刷でも同じ順序を使う。
   function sheetShell(id, user = false) {
@@ -300,6 +301,17 @@ export async function start(installDemo = () => {}) {
     const group=s.group ?? '';
     return `<div class="nav-item" data-item="${s.id}" data-tip="${esc(s.title)}"><a href="#${s.id}" data-nav="${s.id}">${group ? `<small class="nav-g">${esc(group)}</small>` : ''}<span class="nav-title"><span class="nav-t">${esc(s.title)}</span></span></a>${mark}</div>`;
   }
+  function updateTailNext(page) {
+    const btn = page?.querySelector('[data-next-section]');
+    if (!btn) return;
+    const list = items();
+    const index = list.findIndex(s => s.id === page.dataset.section);
+    const next = index >= 0 ? list[index + 1] : null;
+    if (!next) { btn.hidden = true; return; }
+    btn.hidden = false;
+    btn.dataset.nextSection = next.id;
+    btn.textContent = '次へ：' + next.title + ' →';
+  }
   function markCurrent() {
     $('#page-name').textContent = named(current)?.title ?? '';
     for (const a of all('[data-nav]')) {
@@ -309,6 +321,7 @@ export async function start(installDemo = () => {}) {
     }
     $('#prev-section').disabled=selector.selectedIndex<=0;
     $('#next-section').disabled=selector.selectedIndex>=pages().length-1;
+    updateTailNext(sheet());
   }
   function progress(sectionId) {
     const a=store.answers,p=model.progressCounts(a);
@@ -785,6 +798,7 @@ export async function start(installDemo = () => {}) {
     setImages(page);
     drawThumbs(store.answers, markVisible, page);
     refreshImageNames(undefined, page);
+    updateTailNext(page);
   }
 
   function refresh(force = false) {
@@ -941,16 +955,21 @@ export async function start(installDemo = () => {}) {
   }
 
   // ツールチップ。ブラウザ標準の title ではなく、T3 Code のような暗い小窓を出す。data-tip が本文、data-tip-sub が補足。
-  // 一覧の吹き出しは左の枠内で折り返し、本文の見出しを隠さない。
+  // popover="manual" にすることで、showModal() の写真ビューア上でも最前面に表示される。
   const tip=document.createElement('div');
-  tip.id='tip'; tip.setAttribute('role','tooltip'); tip.hidden=true;
+  tip.id='tip'; tip.setAttribute('role','tooltip'); tip.setAttribute('popover','manual'); tip.hidden=true;
   document.body.append(tip);
   let tipFor=null, tipTimer=0;
-  function hideTip() { clearTimeout(tipTimer); tipFor=null; tip.hidden=true; tip.classList.remove('shown'); }
+  function hideTip() {
+    clearTimeout(tipTimer); tipFor=null;
+    try { tip.hidePopover?.(); } catch { /* すでに閉じている場合は無視する。 */ }
+    tip.hidden=true; tip.classList.remove('shown');
+  }
   function placeTip(el) {
     if (!el.isConnected || !el.dataset.tip) return hideTip();
     tip.innerHTML=esc(el.dataset.tip)+(el.dataset.tipSub ? `<small>${esc(el.dataset.tipSub)}</small>` : '');
     tip.hidden=false;
+    try { tip.showPopover?.(); } catch { /* popover 非対応環境では通常の固定配置にフォールバックする。 */ }
     const r=el.getBoundingClientRect(), rail=el.closest('.rail .nav, .rail .foot')?.closest('.rail');
     const railBox = rail?.getBoundingClientRect();
     tip.style.maxWidth = railBox ? Math.max(1, railBox.width - 16) + 'px' : '';
@@ -1037,6 +1056,7 @@ export async function start(installDemo = () => {}) {
       return;
     }
     if (f.nav) {e.preventDefault();navigate(f.nav);return;}
+    if (f.nextSection) {navigate(f.nextSection);return;}
     if (btn?.matches('[data-new-section]')) {forms.newSection('nav');return;}
     if (btn?.matches('[data-cancel-section]')) { forms.discardNew(); return; }
     if (btn?.matches('[data-publish-section]')) { forms.publishNew(); return; }
@@ -1067,9 +1087,20 @@ export async function start(installDemo = () => {}) {
       forms.editRequest(entry,r);return;
     }
     if (f.deleteRequest) {
+      const generation = store.answers;
+      const beforeAnswers = structuredClone(store.answers);
+      const beforeDrafts = view().requestDrafts ? structuredClone(view().requestDrafts) : undefined;
       removeRequest(store.answers,f.deleteRequest);
       if (view().requestDrafts) delete view().requestDrafts[f.deleteRequest];
-      changed();store.viewEdited();notify('依頼を削除しました');return;
+      changed();store.viewEdited();
+      notify('依頼を削除しました', 6500, () => {
+        if (store.answers !== generation) return;
+        store.answers = beforeAnswers;
+        if (beforeDrafts !== undefined) view().requestDrafts = beforeDrafts;
+        else delete view().requestDrafts;
+        changed(); store.viewEdited();
+      });
+      return;
     }
     if (btn?.matches('figcaption [data-rename-image]')) {
       const id = btn.closest('[data-attachment]').dataset.attachment;
@@ -1078,6 +1109,11 @@ export async function start(installDemo = () => {}) {
     }
     if (f.deleteImage) {
       leaveRich();
+      const generation = store.answers;
+      const beforeAnswers = structuredClone(store.answers);
+      const beforeMedia = {...store.media};
+      const beforeReqDrafts = view().requestDrafts ? structuredClone(view().requestDrafts) : undefined;
+      const beforeSecDrafts = view().sectionDrafts ? structuredClone(view().sectionDrafts) : undefined;
       removeAttachment(store.answers,store.media,f.deleteImage);
       for (const d of [...Object.values(view().requestDrafts ?? {}),...Object.values(view().sectionDrafts ?? {})].filter(Boolean)) {
         if (Object.hasOwn(d.images,f.deleteImage)) continue;
@@ -1085,7 +1121,20 @@ export async function start(installDemo = () => {}) {
         d.text=d.text.replaceAll('!['+f.deleteImage+']','');d.attachments=d.attachments.filter(id=>id!==f.deleteImage);
       }
       forms.unmountSection(); changed(); forms.renderSection(sheet());
-      store.viewEdited();notify('画像を削除しました');return;
+      store.viewEdited();
+      notify('画像を削除しました', 6500, () => {
+        if (store.answers !== generation) return;
+        leaveRich();
+        store.answers = beforeAnswers;
+        store.media = beforeMedia;
+        if (beforeReqDrafts !== undefined) view().requestDrafts = beforeReqDrafts;
+        else delete view().requestDrafts;
+        if (beforeSecDrafts !== undefined) view().sectionDrafts = beforeSecDrafts;
+        else delete view().sectionDrafts;
+        forms.unmountSection(); changed(); forms.renderSection(sheet());
+        store.viewEdited();
+      });
+      return;
     }
     if (btn?.hasAttribute('data-bulk')) {
       const {chosen} = counts(store.answers, activeDecisions);
