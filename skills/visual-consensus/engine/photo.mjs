@@ -99,68 +99,150 @@ export function drawThumbs(answers, visible, page = document) {
   }
 }
 
-// 印と画像を同じ座標系で拡大する。2本目の指が着いたら、途中の範囲指定を取り消す。
-function touchViewport(stage, canvas, {cancelMark, placing, zoomChanged, positionPop}) {
-  const fingers = new Map();
-  let scale = 1, offsetX = 0, offsetY = 0, navigating = false, suppressClick = false;
+const MIN_SCALE = 0.25, MAX_SCALE = 8;
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
 
-  function transform(from, to, nextScale) {
+// 印と画像を同じ座標系で拡大・縮小・移動する。タッチ2本指やデスクトップのズーム・パンを共通に扱う。
+function photoViewport(stage, canvas, {cancelMark, placing, changed, positionPop}) {
+  const fingers = new Map();
+  let scale = 1, offsetX = 0, offsetY = 0;
+  let panMode = false, spacePan = false, spaceDragged = false;
+  let touchNavigating = false, suppressClick = false, pinchMinScale = 1;
+  let dragPan = null;
+
+  function stageCenter() {
+    const r = stage.getBoundingClientRect();
+    return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+  }
+
+  function syncPanVisual() {
+    const active = !placing() && scale > 1 && (panMode || spacePan);
+    stage.classList.toggle('pan-mode', active);
+    stage.classList.toggle('panning', Boolean(dragPan));
+  }
+
+  function transform(from, to, rawScale) {
+    let nextScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, rawScale));
+    // 100% に十分近いときは等倍へ揃えて浮動小数点の端数を残さない。
+    if (Math.abs(nextScale - 1) < 0.005) nextScale = 1;
+
     const rect = canvas.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const ratio = nextScale / scale;
-    // 2本の指の中点にある原画像の点を保ち、端では画像が枠から離れないようにする。
-    const limitX = rect.width / scale * (nextScale - 1) / 2;
-    const limitY = rect.height / scale * (nextScale - 1) / 2;
-    offsetX = Math.max(-limitX, Math.min(limitX, offsetX + to.x - cx - (from.x - cx) * ratio));
-    offsetY = Math.max(-limitY, Math.min(limitY, offsetY + to.y - cy - (from.y - cy) * ratio));
-    const wasZoomed = scale > 1;
+    if (rect.width > 0 && rect.height > 0) {
+      const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+      const ratio = nextScale / scale;
+      // 縮小時は中央固定、拡大時は原画像が枠から離れない範囲に収める。
+      const limitX = Math.max(0, rect.width / scale * (nextScale - 1) / 2);
+      const limitY = Math.max(0, rect.height / scale * (nextScale - 1) / 2);
+      offsetX = Math.max(-limitX, Math.min(limitX, offsetX + to.x - cx - (from.x - cx) * ratio));
+      offsetY = Math.max(-limitY, Math.min(limitY, offsetY + to.y - cy - (from.y - cy) * ratio));
+    } else {
+      offsetX = 0;
+      offsetY = 0;
+    }
+
     scale = nextScale;
-    canvas.style.transform = scale === 1 ? '' : `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+    if (scale <= 1) panMode = false;
+    canvas.style.setProperty('--zoom', String(scale));
+    canvas.style.transform = scale === 1 && offsetX === 0 && offsetY === 0
+      ? '' : `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
     stage.classList.toggle('zoomed', scale > 1);
-    if (wasZoomed !== (scale > 1)) zoomChanged(scale > 1);
+    syncPanVisual();
+    changed({scale, panMode, spacePan});
     positionPop();
   }
 
   function span() {
     const [a, b = a] = fingers.values();
-    return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x-b.x, a.y-b.y)};
+    return {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y)};
   }
+
   function consume(event) {
     event.preventDefault();
     event.stopPropagation();
     suppressClick = true;
   }
+
+  stage.addEventListener('wheel', event => {
+    event.preventDefault();
+    const dy = event.deltaMode === 1 ? event.deltaY * 16
+      : event.deltaMode === 2 ? event.deltaY * 400 : event.deltaY;
+    const clamped = Math.max(-180, Math.min(180, dy));
+    const factor = Math.exp(-clamped * (event.ctrlKey ? 0.01 : 0.0025));
+    const pt = {x: event.clientX, y: event.clientY};
+    transform(pt, pt, scale * factor);
+  }, {passive: false});
+
+  stage.addEventListener('auxclick', event => {
+    if (event.button === 1) event.preventDefault();
+  });
+
   stage.addEventListener('pointerdown', event => {
-    if (event.pointerType !== 'touch') return;
-    if (!fingers.size) suppressClick = false;
-    fingers.set(event.pointerId, {x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY});
-    if (fingers.size < 2) return;
-    navigating = true;
+    if (event.pointerType === 'touch') {
+      if (!fingers.size) suppressClick = false;
+      fingers.set(event.pointerId, {x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY});
+      if (fingers.size < 2) return;
+      if (!touchNavigating) pinchMinScale = Math.min(1, scale);
+      touchNavigating = true;
+      cancelMark();
+      for (const id of fingers.keys()) stage.setPointerCapture(id);
+      consume(event);
+      return;
+    }
+
+    // マウスは中ボタンドラッグ、または拡大中の移動モード／Space押下中の左ドラッグでパンする。
+    const middlePan = event.button === 1 && scale > 1;
+    const modePan = event.button === 0 && scale > 1 && (panMode || spacePan) && !placing();
+    if (!middlePan && !modePan) return;
+
     cancelMark();
-    for (const id of fingers.keys()) stage.setPointerCapture(id);
-    consume(event);
+    dragPan = {pointerId: event.pointerId, x: event.clientX, y: event.clientY};
+    if (spacePan) spaceDragged = true;
+    stage.setPointerCapture(event.pointerId);
+    syncPanVisual();
+    event.preventDefault();
+    event.stopPropagation();
   }, true);
+
   stage.addEventListener('pointermove', event => {
+    if (dragPan && event.pointerId === dragPan.pointerId) {
+      const from = {x: dragPan.x, y: dragPan.y};
+      const to = {x: event.clientX, y: event.clientY};
+      dragPan.x = to.x;
+      dragPan.y = to.y;
+      transform(from, to, scale);
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
     const finger = fingers.get(event.pointerId);
     if (!finger) return;
     const before = span();
     finger.x = event.clientX; finger.y = event.clientY;
-    if (!navigating && scale > 1 && !placing() && Math.hypot(finger.x-finger.startX, finger.y-finger.startY) >= 6) {
-      navigating = true;
+    if (!touchNavigating && scale > 1 && !placing() && Math.hypot(finger.x - finger.startX, finger.y - finger.startY) >= 6) {
+      touchNavigating = true;
       cancelMark();
       stage.setPointerCapture(event.pointerId);
     }
-    if (!navigating) return;
+    if (!touchNavigating) return;
     const after = span();
     const nextScale = before.distance && after.distance
-      ? Math.max(1, Math.min(8, scale * after.distance / before.distance)) : scale;
+      ? Math.max(pinchMinScale, Math.min(MAX_SCALE, scale * after.distance / before.distance)) : scale;
     transform(before, after, nextScale);
     consume(event);
   }, true);
+
   function release(event) {
+    if (dragPan && event.pointerId === dragPan.pointerId) {
+      dragPan = null;
+      syncPanVisual();
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (!fingers.delete(event.pointerId)) return;
-    if (navigating) consume(event);
-    if (!fingers.size) navigating = false;
+    if (touchNavigating) consume(event);
+    if (!fingers.size) touchNavigating = false;
   }
   stage.addEventListener('pointerup', release, true);
   stage.addEventListener('pointercancel', release, true);
@@ -168,48 +250,122 @@ function touchViewport(stage, canvas, {cancelMark, placing, zoomChanged, positio
     if (suppressClick && event.pointerType === 'touch') consume(event);
   }, true);
 
-  return () => {
-    fingers.clear();
-    navigating = suppressClick = false;
-    cancelMark();
-    transform({x: 0, y: 0}, {x: 0, y: 0}, 1);
+  return {
+    getScale: () => scale,
+    isPanMode: () => panMode,
+    setPanMode(on) {
+      panMode = Boolean(on) && scale > 1;
+      syncPanVisual();
+      changed({scale, panMode, spacePan});
+    },
+    setSpacePan(on) {
+      const next = Boolean(on);
+      if (spacePan === next) return false;
+      const dragged = spaceDragged;
+      spacePan = next;
+      if (next) spaceDragged = false;
+      syncPanVisual();
+      return dragged;
+    },
+    zoomByStep(direction) {
+      const next = direction > 0
+        ? ZOOM_STEPS.find(step => step > scale + 0.01) ?? MAX_SCALE
+        : [...ZOOM_STEPS].reverse().find(step => step < scale - 0.01) ?? MIN_SCALE;
+      const center = stageCenter();
+      transform(center, center, next);
+    },
+    clamp() {
+      const center = stageCenter();
+      transform(center, center, scale);
+    },
+    reset() {
+      fingers.clear();
+      dragPan = null;
+      panMode = spacePan = spaceDragged = touchNavigating = suppressClick = false;
+      pinchMinScale = 1;
+      offsetX = offsetY = 0;
+      cancelMark();
+      transform({x: 0, y: 0}, {x: 0, y: 0}, 1);
+    },
   };
 }
 
 /** 画像だけを囲む枠を座標系とする。余白・見出し・縮尺を変えても同じ位置を指す。
  * 返した関数に印の番号を渡すと、その印の編集を開く。最後の edit を false にすると対応済みの要約から開く。 */
 export function photoViewer(store, changed, describe, hooks) {
-  const modal = make('dialog','photo-zoom rv-dialog rv-ui');
+  const modal = make('dialog','photo-zoom rv-dialog rv-fullscreen rv-ui');
   modal.setAttribute('aria-labelledby','rv-photo-title');
-  modal.innerHTML = '<header><h2 id="rv-photo-title"></h2><button type="button" data-close>閉じる</button></header>'
-    +'<p class="rv-photo-caption"></p><div class="rv-stage"><div class="rv-canvas" tabindex="0"><img alt="" draggable="false"></div></div>'
+  modal.innerHTML = '<header><h2 id="rv-photo-title"></h2>'
+    +'<div class="rv-header-actions">'
+    +'<div class="rv-zoom-controls" role="group" aria-label="表示倍率">'
+    +'<button type="button" data-zoom-out aria-label="縮小" data-tip="縮小">−</button>'
+    +'<button type="button" data-zoom-reset aria-label="表示倍率を100%に戻す" data-tip="100%に戻す">100%</button>'
+    +'<button type="button" data-zoom-in aria-label="拡大" data-tip="拡大">＋</button>'
+    +'</div>'
+    +'<button type="button" data-pan-toggle aria-pressed="false" data-tip="拡大中にドラッグで画像を移動" disabled>移動</button>'
+    +'<button type="button" data-fullscreen-toggle aria-pressed="true" data-tip="標準サイズに切り替える">標準サイズ</button>'
+    +'<button type="button" data-close>閉じる</button></div></header>'
+    +'<div class="rv-body"><div class="rv-workspace">'
+    +'<div class="rv-stage"><div class="rv-canvas" tabindex="0"><img alt="" draggable="false"></div></div>'
     +'<div class="rv-pin-tools"><span class="rv-pin-hint" role="status"></span><button type="button" data-cancel hidden>取り消す</button></div>'
+    +'</div><aside class="rv-side"><p class="rv-photo-caption"></p>'
     +'<div data-photo-description></div>'
-    +'<ol class="rv-pin-list" aria-label="画像の印"></ol>'
+    +'<ol class="rv-pin-list" aria-label="画像の印"></ol></aside></div>'
     +'<div class="rv-pop" role="group" hidden></div>';
   document.body.append(modal);
+  const stage = modal.querySelector('.rv-stage');
   const canvas = modal.querySelector('.rv-canvas'), image = canvas.querySelector('img');
   const title = modal.querySelector('h2'), caption = modal.querySelector('.rv-photo-caption');
   const cancel = modal.querySelector('[data-cancel]'), hint = modal.querySelector('.rv-pin-hint'), list = modal.querySelector('ol');
   const pop = modal.querySelector('.rv-pop');
   const description = modal.querySelector('[data-photo-description]');
+  const zoomOutBtn = modal.querySelector('[data-zoom-out]');
+  const zoomResetBtn = modal.querySelector('[data-zoom-reset]');
+  const zoomInBtn = modal.querySelector('[data-zoom-in]');
+  const panToggle = modal.querySelector('[data-pan-toggle]');
+  const fullscreenToggle = modal.querySelector('[data-fullscreen-toggle]');
   const touch = navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches;
   const markHint = touch ? 'タップでピン、なぞると範囲を指定できます。' : 'クリックでピン、ドラッグで範囲を指定できます。';
   let idleHint;
-  function updateHint(zoomed) {
-    const instruction = touch && zoomed ? 'タップでピン、なぞると画像を移動できます。' : markHint;
-    idleHint = instruction + (touch ? '2本指で広げる・縮めると倍率を変えられます。' : '') + '印を押すと一言を書けます。移動と削除は画像の下の一覧で行えます。';
+  function updateViewportUI({scale, panMode}) {
+    const zoomed = scale > 1;
+    const percent = Math.round(scale * 100) + '%';
+    zoomResetBtn.textContent = percent;
+    zoomResetBtn.disabled = scale === 1;
+    zoomOutBtn.disabled = scale <= MIN_SCALE;
+    zoomInBtn.disabled = scale >= MAX_SCALE;
+    panToggle.disabled = !zoomed;
+    panToggle.setAttribute('aria-pressed', String(panMode));
+
+    const instruction = touch && zoomed ? 'タップでピン、なぞると画像を移動できます。'
+      : !touch && panMode ? 'ドラッグで画像を移動できます。' : markHint;
+    const zoomNote = touch ? '2本指で広げる・縮めると倍率を変えられます。' : 'ホイールや右上のボタンで拡大・縮小できます。';
+    idleHint = instruction + zoomNote + '印を押すと一言を書けます。移動と削除は一覧で行えます。';
     canvas.setAttribute('aria-label', '画像。' + instruction + 'Enterでキーボードからピンを立てる');
     if (!armed) hint.textContent = idleHint;
   }
+
+  function setFullscreen(on) {
+    modal.classList.toggle('rv-fullscreen', on);
+    fullscreenToggle.setAttribute('aria-pressed', String(on));
+    fullscreenToggle.textContent = on ? '標準サイズ' : '全画面';
+    fullscreenToggle.dataset.tip = on ? '標準サイズに切り替える' : '全画面で広く表示する';
+    if (modal.open) requestAnimationFrame(() => viewport.clamp());
+  }
+
   let key, armed = false, moving = null, cursor = null, popMark = null, drag = null;
-  updateHint(false);
-  const resetViewport = touchViewport(canvas.parentElement, canvas, {
+  const viewport = photoViewport(stage, canvas, {
     cancelMark() { drag?.box?.remove(); drag = null; },
     placing: () => armed,
-    zoomChanged: updateHint,
+    changed: updateViewportUI,
     positionPop,
   });
+  updateViewportUI({scale: 1, panMode: false});
+  zoomOutBtn.onclick = () => viewport.zoomByStep(-1);
+  zoomInBtn.onclick = () => viewport.zoomByStep(1);
+  zoomResetBtn.onclick = () => viewport.reset();
+  panToggle.onclick = () => viewport.setPanMode(!viewport.isPanMode());
+  fullscreenToggle.onclick = () => setFullscreen(!modal.classList.contains('rv-fullscreen'));
   const group = () => store.answers.pins[key];
   function summary(button,mark) {
     const badge=make('em'), words=make('span');
@@ -227,7 +383,7 @@ export function photoViewer(store, changed, describe, hooks) {
 
   /** 位置を変えるときと、キーボードで置くときだけ照準を出す。 */
   function arm(on, mark = null) {
-    if (on) closePop();
+    if (on) { closePop(); viewport.setPanMode(false); }
     armed = on; moving = mark; cursor?.remove(); cursor = null;
     modal.classList.toggle('rv-placing', on);
     cancel.hidden = !on;
@@ -282,10 +438,16 @@ export function photoViewer(store, changed, describe, hooks) {
     if (!badge) return;
     const anchor = (isRange(mark) ? badge.parentElement : badge).getBoundingClientRect();
     const m = modal.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
-    let left = anchor.left - m.left + anchor.width/2 - w/2, top = anchor.bottom - m.top + modal.scrollTop + 8;
-    left = Math.max(8, Math.min(left, m.width - w - 8));
+    const stageBox = stage.getBoundingClientRect();
+    // 2カラム全画面ではステージ領域の幅内に優先配置し、右の一覧を隠さない。
+    const areaRight = stageBox.right < m.right - 20 ? Math.max(stageBox.right - m.left, w + 16) : m.width;
+    let left = anchor.left - m.left + anchor.width/2 - w/2;
+    let top = anchor.bottom - m.top + modal.scrollTop + 8;
+    left = Math.max(8, Math.min(left, areaRight - w - 8));
     if (anchor.bottom + h + 16 > Math.min(m.bottom, innerHeight)) top = anchor.top - m.top + modal.scrollTop - h - 8;
-    pop.style.left = left+'px'; pop.style.top = Math.max(4, top)+'px';
+    const minTop = modal.scrollTop + 8;
+    const maxTop = modal.scrollTop + Math.max(8, modal.clientHeight - h - 8);
+    pop.style.left = left+'px'; pop.style.top = Math.max(minTop, Math.min(top, maxTop))+'px';
     canvas.querySelectorAll('.rv-mark').forEach(el => el.classList.toggle('rv-active', el.contains(badge)));
 
   }
@@ -303,6 +465,7 @@ export function photoViewer(store, changed, describe, hooks) {
     changed(); render(); canvas.focus({preventScroll:true});
   }
   new ResizeObserver(positionPop).observe(pop);
+  new ResizeObserver(() => { if (modal.open) viewport.clamp(); }).observe(stage);
 
 
   function render() {
@@ -394,7 +557,7 @@ export function photoViewer(store, changed, describe, hooks) {
   canvas.onpointercancel = () => { drag?.box?.remove(); drag = null; };
   canvas.onkeydown = event => {
     if (!armed) {
-      if (event.target === canvas && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); arm(true); }
+      if (event.target === canvas && event.key === 'Enter') { event.preventDefault(); arm(true); }
       return;
     }
     let x=parseFloat(cursor.style.left)/100, y=parseFloat(cursor.style.top)/100;
@@ -411,15 +574,34 @@ export function photoViewer(store, changed, describe, hooks) {
     cursor.style.top = pct(fraction(y+(dy[event.key] ?? 0)));
   };
   modal.querySelector('[data-close]').onclick=()=>modal.close();
-  modal.addEventListener('close',()=>{ arm(false); closePop(); hooks.closed(); hooks.refresh(); });
+  modal.addEventListener('close',()=>{ viewport.setSpacePan(false); arm(false); closePop(); hooks.closed(); hooks.refresh(); });
   // Edge の連続した Escape は、取り消せない dialog.cancel になる場合がある。
   // 内側の編集を閉じるキーは dialog の既定動作より先に扱う。
   modal.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || event.isComposing || (!armed && !popMark)) return;
-    event.preventDefault();
-    if (armed) arm(false);
-    else closePop();
-    canvas.focus({preventScroll: true});
+    if (event.isComposing) return;
+    if (event.key === 'Escape' && (armed || popMark)) {
+      event.preventDefault();
+      if (armed) arm(false);
+      else closePop();
+      canvas.focus({preventScroll: true});
+      return;
+    }
+    if (event.target.closest('input, textarea, [contenteditable]')) return;
+    if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
+      event.preventDefault(); viewport.zoomByStep(1);
+    } else if (event.key === '-' || event.code === 'NumpadSubtract') {
+      event.preventDefault(); viewport.zoomByStep(-1);
+    } else if (event.key === '0' || event.code === 'Numpad0') {
+      event.preventDefault(); viewport.reset();
+    } else if (event.key === ' ' && !armed && !event.target.closest('button, a')) {
+      event.preventDefault();
+      if (!event.repeat) viewport.setSpacePan(true);
+    }
+  });
+  modal.addEventListener('keyup', event => {
+    if (event.key !== ' ') return;
+    const dragged = viewport.setSpacePan(false);
+    if (!dragged && !armed && event.target === canvas) arm(true);
   });
   modal.addEventListener('cancel',event=>{
     if (armed) { event.preventDefault(); arm(false); }
@@ -434,7 +616,8 @@ export function photoViewer(store, changed, describe, hooks) {
   };
   return (id,src,alt,number,cursor,edit = true,fresh = false) => {
     key=id;
-    resetViewport();
+    setFullscreen(true);
+    viewport.reset();
     const picture = describe(store.answers,id);
     const isIssue=picture.issue===true;
     const attachment = store.answers.attachments[id];

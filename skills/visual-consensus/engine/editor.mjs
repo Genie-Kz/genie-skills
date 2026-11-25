@@ -29,8 +29,8 @@ export function editImageName(button, original, save, restoreFocus = () => butto
     input.addEventListener(type, event => event.stopPropagation());
   }
   let composing = false;
-  input.oncompositionstart = () => { composing = true; };
-  input.oncompositionend = () => { composing = false; };
+  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionend', () => { composing = false; });
   input.onkeydown = event => {
     event.stopPropagation();
     if (composing || event.isComposing || event.keyCode === 229) return;
@@ -208,7 +208,7 @@ export function mountEditor(host, options) {
       return;
     }
     value = next;
-    txt.classList.toggle('blank', !value);
+    txt.classList.toggle('blank', !value && !composing);
     options.change(value);
     capture();
   }
@@ -258,8 +258,8 @@ export function mountEditor(host, options) {
   };
   txt.oninput = change;
   txt.onkeyup = txt.onpointerup = capture;
-  txt.oncompositionstart = () => { composing = true; };
-  txt.oncompositionend = () => { composing = false; change(); };
+  txt.addEventListener('compositionstart', () => { composing = true; txt.classList.remove('blank'); });
+  txt.addEventListener('compositionend', () => { composing = false; change(); });
   function commit() {
     if (pending) { notify('画像を読み込み中です'); return; }
     options.commit();
