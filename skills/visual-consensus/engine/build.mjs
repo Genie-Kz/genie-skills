@@ -214,10 +214,18 @@ async function build(entry) {
     const bytes = await readFile(path.join(engine, name + '.mjs'));
     imports['review-kit/' + name] = 'data:text/javascript;base64,' + bytes.toString('base64');
   }
+  // オフラインでも英数字の書体を揃えるため、Inter Variable（Latin のみ）を埋め込む。
+  const interFont = await readFile(path.join(engine, 'fonts', 'inter-latin-wght-normal.woff2'));
+  const fonts = [
+    '/* Inter Variable — Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter) — SIL Open Font License 1.1 */',
+    '@font-face{font-family:"Inter Variable";font-style:normal;font-weight:100 900;font-display:swap;'
+      + `src:url("data:font/woff2;base64,${interFont.toString('base64')}") format("woff2");`
+      + 'unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;}',
+  ].join('\n');
   const demo = doc.script ? (await readAsset(root, 'script', doc.script, 'utf8')).replace(/<\/script/gi, '<\\/script') : '';
   const template = await readFile(path.join(engine, 'document.html'), 'utf8');
-  const render = () => template.replace(/\{\{(TITLE|CSS|IMPORTS|DATA|DEMO)\}\}/g, (_, key) => ({
-    TITLE: escapeHtml(doc.title), CSS: css, IMPORTS: json({imports}), DATA: json({doc, assets}), DEMO: demo,
+  const render = () => template.replace(/\{\{(TITLE|CSS|FONTS|IMPORTS|DATA|DEMO)\}\}/g, (_, key) => ({
+    TITLE: escapeHtml(doc.title), CSS: css, FONTS: fonts, IMPORTS: json({imports}), DATA: json({doc, assets}), DEMO: demo,
   })[key]);
 
   // 原稿と素材をすべて検証してから出力する。エラーを直す間も前の HTML と回答を使える。

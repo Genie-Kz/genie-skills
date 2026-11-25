@@ -22,7 +22,7 @@
   --warn: #d29922;
   --warn-tint: rgba(187, 128, 9, .15);
   --gutter: 36px;
-  --font: -apple-system, "Segoe UI", "Noto Sans", "Yu Gothic UI", "Meiryo UI", sans-serif;
+  --font: "Inter Variable", "Noto Sans JP", "Hiragino Sans", "BIZ UDPGothic", "Yu Gothic UI", "Meiryo UI", -apple-system, "Segoe UI", sans-serif;
 }
 
 * { box-sizing: border-box; }
