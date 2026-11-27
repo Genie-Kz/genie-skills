@@ -305,9 +305,27 @@ export function mountEditor(host, options) {
     if (files.length) attach(files);
     else document.execCommand('insertText',false,e.clipboardData.getData('text/plain').replace(/\r\n?/g,'\n'));
   };
-  txt.ondragover = e => { e.preventDefault(); };
+  const editorBox = host.querySelector('.editor');
+  const hasDraggedFiles = e => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  let dragDepth = 0;
+  txt.ondragenter = e => {
+    if (!hasDraggedFiles(e)) return;
+    dragDepth++;
+    editorBox.classList.add('editor-drop-over');
+  };
+  txt.ondragover = e => {
+    e.preventDefault();
+    if (hasDraggedFiles(e)) editorBox.classList.add('editor-drop-over');
+  };
+  txt.ondragleave = e => {
+    if (!hasDraggedFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) editorBox.classList.remove('editor-drop-over');
+  };
   txt.ondrop = e => {
     e.preventDefault(); e.stopPropagation();
+    dragDepth = 0;
+    editorBox.classList.remove('editor-drop-over');
     const caret = document.caretRangeFromPoint(e.clientX,e.clientY);
     if (caret && txt.contains(caret.startContainer)) { const s=getSelection(); s.removeAllRanges(); s.addRange(caret); }
     if (e.dataTransfer.files.length) attach(e.dataTransfer.files);

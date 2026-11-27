@@ -585,13 +585,22 @@ export async function start(installDemo = () => {}) {
     if (!host) return;
     const owner = current === SETTLED ? host.closest('[data-settled-section]')?.dataset.settledSection ?? 'general' : current;
     const a = store.answers;
+    const saved = view().editor === key && view().noteDraft?.key === key ? view().noteDraft : null;
+    const original = saved ? saved.original ?? '' : valueOf(key);
     const close=()=>{
       endRich(key); renderSlot(host,true); refresh();
       const opener=$('[data-write]',host) ?? host.closest('.decision-card')?.querySelector('.item-actions button') ?? host.closest('.row')?.querySelector('.hover button') ?? host.closest('.section-tail')?.querySelector('.tail-bar [data-write]');
       if (focus) opener?.focus({preventScroll:true});
     };
     return openComment(host,{key,label:noteHint(key),value:valueOf(key),media,focus,cursor,change:v=>writeValue(key,v),
-      commit:close,escape:close,attach:async(files,alive)=>{
+      commit:close,escape:close,
+      cancel() {
+        writeValue(key, original);
+        delete view().noteDraft;
+        store.viewEdited();
+        close();
+      },
+      attach:async(files,alive)=>{
         const data=await decodeFiles(files);
         if (!alive() || store.answers!==a) return [];
         const ids=data.map(png=>registerImage(owner,png));
@@ -886,8 +895,22 @@ export async function start(installDemo = () => {}) {
     }});
   forms=createForms({store,model,view,current:()=>current,sections:items,notify,changed,navigate,openRich,endRich,
     updateDraftTitle,resumeRequest,previewRequest,nameOf,refreshImageNames,leaveRich});
+  function pagePhotos() {
+    const page = sheet();
+    if (!page) return [];
+    const ids = [], seen = new Set();
+    for (const el of all('[data-photo], [data-open], .inline-image[data-inline]', page)) {
+      if (el.closest('[hidden], [contenteditable], .note, dialog')) continue;
+      const id = el.dataset.photo ?? el.dataset.open ?? el.dataset.inline;
+      if (!id || seen.has(id) || !media(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
   let photoOpenerId;
-  viewer=photoViewer(store,changed,model.picture,{refresh, markVisible,
+  viewer=photoViewer(store,changed,model.picture,{refresh, markVisible, gallery: pagePhotos,
+    openImage: (id, keepFullscreen) => viewPhoto(id, undefined, {keepFullscreen}),
     opened(id, number, fresh = false) {
       view().viewer = {id, number};
       if (fresh) view().viewer.fresh = true;
@@ -943,7 +966,7 @@ export async function start(installDemo = () => {}) {
       endRich('pin:'+id+':'+number);
     },
   });
-  function viewPhoto(id, number, {opener, cursor, edit = true, fresh = false} = {}) {
+  function viewPhoto(id, number, {opener, cursor, edit = true, fresh = false, keepFullscreen = false} = {}) {
     if (!media(id)) return;
     leaveRich();
     // 同じ図でも掲載箇所ごとに説明が異なる。印は図の ID で共有し、開いた場所は表示状態にだけ残す。
@@ -951,7 +974,7 @@ export async function start(installDemo = () => {}) {
     photoOpenerId = source?.id;
     const detail = source?.querySelector('img[alt]:not([alt=""])')
       ?? sheet()?.querySelector(`[data-photo="${CSS.escape(id)}"] img[alt]:not([alt=""])`);
-    viewer(id, media(id), detail?.alt, number, cursor, edit, fresh);
+    viewer(id, media(id), detail?.alt, number, cursor, edit, fresh, keepFullscreen);
   }
 
   // ツールチップ。ブラウザ標準の title ではなく、T3 Code のような暗い小窓を出す。data-tip が本文、data-tip-sub が補足。
@@ -1037,6 +1060,8 @@ export async function start(installDemo = () => {}) {
       if ($('.photo-zoom').open) $('.photo-zoom').close();
       if (!restoring && active && group?.contains(active.host)) leaveRich();
       const previous = current;
+      const generation = store.answers;
+      const beforeArchived = store.answers.archived ? structuredClone(store.answers.archived) : undefined;
       model.setArchived(store.answers, key, !restoring);
       changed();
       if (restoring && named(key) && /^S-\d+$/.test(key)) navigate(key);
@@ -1045,7 +1070,17 @@ export async function start(installDemo = () => {}) {
         const next = sheet().querySelector('.filed-list [data-restore]') ?? main;
         next.focus({preventScroll: true});
       }
-      notify(restoring ? '元の場所に戻しました' : '決定事項の「完了したもの」に移しました');
+      if (restoring) {
+        notify('元の場所に戻しました');
+      } else {
+        notify('決定事項の「完了したもの」に移しました', 4500, () => {
+          if (store.answers !== generation) return;
+          if (beforeArchived !== undefined) store.answers.archived = beforeArchived;
+          else delete store.answers.archived;
+          changed();
+          if (named(previous) && current !== previous) navigate(previous, null, true);
+        });
+      }
       return;
     }
     if (f.seeReply) { revealReply(btn); return; }
@@ -1192,10 +1227,35 @@ export async function start(installDemo = () => {}) {
     if (current === DRAFT_PAGE) forms.attachToSection(files);
     else addFiles(current === SETTLED ? 'general' : current, files);
   }
-  main.addEventListener('dragover',e=>{if (e.dataTransfer.types.includes('Files')) e.preventDefault();});
-  main.addEventListener('drop',e=>{
+  const workspace = $('.workspace');
+  const hasDraggedFiles = e => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  let fileDragDepth = 0;
+  function clearFileDrag() {
+    fileDragDepth = 0;
+    workspace.classList.remove('file-drag-over');
+    for (const el of all('.editor.editor-drop-over')) el.classList.remove('editor-drop-over');
+  }
+  main.addEventListener('dragenter', e => {
+    if (!hasDraggedFiles(e)) return;
+    fileDragDepth++;
+    workspace.classList.toggle('file-drag-over', !e.target.closest?.('.editor'));
+  });
+  main.addEventListener('dragover', e => {
+    if (!hasDraggedFiles(e)) return;
+    e.preventDefault();
+    workspace.classList.toggle('file-drag-over', !e.target.closest?.('.editor'));
+  });
+  main.addEventListener('dragleave', e => {
+    if (!hasDraggedFiles(e)) return;
+    fileDragDepth = Math.max(0, fileDragDepth - 1);
+    if (!fileDragDepth) workspace.classList.remove('file-drag-over');
+  });
+  main.addEventListener('drop', e => {
+    clearFileDrag();
     if (!e.defaultPrevented && e.dataTransfer.files.length) {e.preventDefault();attachToPage(e.dataTransfer.files);}
   });
+  window.addEventListener('dragend', clearFileDrag);
+  window.addEventListener('blur', clearFileDrag);
   document.addEventListener('paste',e=>{
     if (!e.defaultPrevented && !e.target.closest('dialog,input,textarea') && e.clipboardData.files.length) {
       e.preventDefault();attachToPage(e.clipboardData.files);

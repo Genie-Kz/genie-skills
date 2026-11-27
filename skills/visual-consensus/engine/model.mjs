@@ -589,10 +589,22 @@ export function answerModel(doc) {
     if (!a.archived?.[key]) a.archived = {...a.archived, [key]: {at: edition}};
   }
 
-  function resolvedLabel(key) {
+  function resolvedEdition(key) {
     key = storedAddress(key);
     const at = doc.resolvedEditions?.[printedAddress(key)] ?? doc.resolvedEditions?.[key];
-    return Number.isSafeInteger(at) ? '✓ 対応済み（第' + at + '回）' : '';
+    return Number.isSafeInteger(at) ? at : 0;
+  }
+
+  function resolvedLabel(key) {
+    const at = resolvedEdition(key);
+    return at ? '✓ 対応済み（第' + at + '回）' : '';
+  }
+
+  /** この回に新しく返事または対応が付いた項目なら true。初期表示で開いたまま見せる判定に使う。 */
+  function hasCurrentActivity(a, key) {
+    const current = doc.built?.number;
+    if (!validEdition(current)) return false;
+    return resolvedEdition(key) === current || threads(a, key).some(item => item.edition === current);
   }
 
   function settledSummary(a, d) {
@@ -1149,7 +1161,7 @@ export function answerModel(doc) {
   }
 
   return {empty, unpack, markdown, picture, figuresInSection, sectionTitle, targetLabel, saveRequest, submitDraft,
-    activeDecisions, addresses, threads, replyLocation, recordEdition, followUp, settledSummary, setItemComment, setArchived, resolvedLabel,
+    activeDecisions, addresses, threads, replyLocation, recordEdition, followUp, settledSummary, setItemComment, setArchived, resolvedLabel, hasCurrentActivity,
     filedTitle, archivedItems: a => reviewDocument(a, {preview: true}).filed,
     canApproveSection, setSectionApproved, isSectionApproved, sectionAttentionEdition, sectionProgress, sectionState,
     progressCounts: a => counts(a, activeDecisions, isSectionApproved)};

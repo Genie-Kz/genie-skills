@@ -314,7 +314,12 @@ function photoViewport(stage, canvas, {cancelMark, placing, changed, positionPop
 export function photoViewer(store, changed, describe, hooks) {
   const modal = make('dialog','photo-zoom rv-dialog rv-ui');
   modal.setAttribute('aria-labelledby','rv-photo-title');
-  modal.innerHTML = '<header><h2 id="rv-photo-title"></h2>'
+  modal.innerHTML = '<header><div class="rv-header-title">'
+    +'<div class="rv-img-nav" role="group" aria-label="画像の切り替え" hidden>'
+    +'<button type="button" data-prev-image aria-label="前の画像" data-tip="前の画像">‹</button>'
+    +'<span class="rv-img-count" aria-live="polite"></span>'
+    +'<button type="button" data-next-image aria-label="次の画像" data-tip="次の画像">›</button>'
+    +'</div><h2 id="rv-photo-title"></h2></div>'
     +'<div class="rv-header-actions">'
     +'<button type="button" class="rv-icon-btn" data-undo-marks aria-label="元に戻す" data-tip="元に戻す" disabled><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-undo"/></svg></button>'
     +'<button type="button" class="rv-icon-btn" data-redo-marks aria-label="やり直す" data-tip="やり直す" disabled><svg class="rv-icon" aria-hidden="true"><use href="#vc-icon-redo"/></svg></button>'
@@ -341,6 +346,10 @@ export function photoViewer(store, changed, describe, hooks) {
   const cancel = modal.querySelector('[data-cancel]'), hint = modal.querySelector('.rv-pin-hint'), list = modal.querySelector('ol');
   const pop = modal.querySelector('.rv-pop');
   const description = modal.querySelector('[data-photo-description]');
+  const imgNav = modal.querySelector('.rv-img-nav');
+  const prevImgBtn = modal.querySelector('[data-prev-image]');
+  const nextImgBtn = modal.querySelector('[data-next-image]');
+  const imgCount = modal.querySelector('.rv-img-count');
   const undoBtn = modal.querySelector('[data-undo-marks]');
   const redoBtn = modal.querySelector('[data-redo-marks]');
   const zoomOutBtn = modal.querySelector('[data-zoom-out]');
@@ -430,6 +439,7 @@ export function photoViewer(store, changed, describe, hooks) {
     changed();
     render();
     syncHistoryButtons();
+    if (!modal.contains(document.activeElement)) canvas.focus({preventScroll: true});
     hint.textContent = '直前の印の操作を元に戻しました。';
   }
 
@@ -443,6 +453,7 @@ export function photoViewer(store, changed, describe, hooks) {
     changed();
     render();
     syncHistoryButtons();
+    if (!modal.contains(document.activeElement)) canvas.focus({preventScroll: true});
     hint.textContent = '取り消した印の操作をやり直しました。';
   }
 
@@ -453,6 +464,31 @@ export function photoViewer(store, changed, describe, hooks) {
   zoomResetBtn.onclick = () => viewport.reset();
   panToggle.onclick = () => viewport.setPanMode(!viewport.isPanMode());
   fullscreenToggle.onclick = () => setFullscreen(!modal.classList.contains('rv-fullscreen'));
+
+  function syncGallery() {
+    const ids = hooks.gallery?.() ?? [];
+    const index = ids.indexOf(key);
+    if (ids.length < 2 || index < 0) {
+      imgNav.hidden = true;
+      return;
+    }
+    imgNav.hidden = false;
+    imgCount.textContent = (index + 1) + ' / ' + ids.length;
+    prevImgBtn.disabled = index <= 0;
+    nextImgBtn.disabled = index >= ids.length - 1;
+  }
+
+  function stepGallery(delta) {
+    const ids = hooks.gallery?.() ?? [];
+    const index = ids.indexOf(key), nextId = ids[index + delta];
+    if (!nextId) return;
+    hooks.openImage?.(nextId, modal.classList.contains('rv-fullscreen'));
+    const prefer = delta < 0 ? prevImgBtn : nextImgBtn;
+    const fallback = delta < 0 ? nextImgBtn : prevImgBtn;
+    (!prefer.disabled ? prefer : !fallback.disabled ? fallback : modal.querySelector('[data-close]')).focus({preventScroll: true});
+  }
+  prevImgBtn.onclick = () => stepGallery(-1);
+  nextImgBtn.onclick = () => stepGallery(1);
 
   function summary(button,mark) {
     const badge=make('em'), words=make('span');
@@ -521,9 +557,22 @@ export function photoViewer(store, changed, describe, hooks) {
       hooks.editPin(conversation.querySelector('[data-pop-text]'), key, mark,
         () => { closePop(); hooks.refresh(); canvas.focus({preventScroll: true}); }, cursor,
         () => summary(list.querySelector(`[data-show-mark="${mark.number}"]`), mark), fresh ? discardFreshMark : null);
+      // 確定済みの印はポップオーバー内から直接削除できるようにする（新規配置直後はキャンセルで破棄できる）。
+      if (!fresh) {
+        const footer = conversation.querySelector('.ft');
+        if (footer && !footer.querySelector('[data-pop-delete]')) {
+          const erase = make('button', 'text-button rv-pop-delete');
+          erase.type = 'button';
+          erase.dataset.popDelete = String(mark.number);
+          erase.textContent = '削除';
+          erase.setAttribute('aria-label', markName(mark) + 'を削除');
+          erase.onclick = () => remove(mark);
+          footer.prepend(erase);
+        }
+      }
     }
-    // 印からは要約を開き、元のコメントや下書きから来た場合はそのまま編集を続ける。
-    if (fold && !edit) {
+    // 印からは要約が閉じているときだけ要約を開き、既に展開済みまたは一覧・下書きから来た場合は直接編集する。
+    if (fold && !edit && !fold.open) {
       fold.querySelector('summary').focus({preventScroll: true});
       fold.addEventListener('toggle', function onOpen() {
         if (!fold.open || !conversation.isConnected) return;
@@ -590,9 +639,10 @@ export function photoViewer(store, changed, describe, hooks) {
       badge.onblur = () => highlightMark(null);
       badge.onpointerdown = event => {
         event.stopPropagation();
-        // ピンは 6px 以上ドラッグしたときだけ直接位置を調整し、短いクリックは一言編集を開く。
-        if (isRange(mark) || event.button !== 0 || armed || viewport.isPanMode()) return;
-        pinDrag = {mark, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
+        // ピンと範囲の番号バッジは 6px 以上ドラッグしたときだけ位置を調整し、短いクリックは一言編集を開く。
+        if (event.button !== 0 || armed || viewport.isPanMode()) return;
+        pinDrag = {mark, el, isRange: isRange(mark), pointerId: event.pointerId,
+          startX: event.clientX, startY: event.clientY, startPt: point(event),
           moved: false, beforeSnap: null, origX: mark.x, origY: mark.y};
         badge.setPointerCapture(event.pointerId);
       };
@@ -606,8 +656,16 @@ export function photoViewer(store, changed, describe, hooks) {
           badge.classList.add('rv-dragging');
         }
         const pt = point(event);
-        mark.x = pt.x; mark.y = pt.y;
-        badge.style.left = pct(pt.x); badge.style.top = pct(pt.y);
+        if (pinDrag.isRange) {
+          const dx = pt.x - pinDrag.startPt.x, dy = pt.y - pinDrag.startPt.y;
+          mark.x = fraction(Math.min(1 - mark.w, Math.max(0, pinDrag.origX + dx)));
+          mark.y = fraction(Math.min(1 - mark.h, Math.max(0, pinDrag.origY + dy)));
+          pinDrag.el.style.left = pct(mark.x);
+          pinDrag.el.style.top = pct(mark.y);
+        } else {
+          mark.x = pt.x; mark.y = pt.y;
+          badge.style.left = pct(pt.x); badge.style.top = pct(pt.y);
+        }
         event.preventDefault();
       };
       const finishPinDrag = event => {
@@ -623,6 +681,8 @@ export function photoViewer(store, changed, describe, hooks) {
         suppressPinClick = mark.number;
         pushHistory(d.beforeSnap);
         changed(); render();
+        // render() で旧バッジが DOM から外れるとフォーカスが dialog 外へ逃げるため、再描画後のバッジへ戻す。
+        (badgeOf(mark.number) ?? canvas).focus({preventScroll: true});
       };
       badge.onpointerup = finishPinDrag;
       badge.onpointercancel = finishPinDrag;
@@ -784,11 +844,13 @@ export function photoViewer(store, changed, describe, hooks) {
       if (event.clientX<r.left || event.clientX>r.right || event.clientY<r.top || event.clientY>r.bottom) modal.close();
     }
   };
-  return (id,src,alt,number,cursor,edit = true,fresh = false) => {
+  return (id,src,alt,number,cursor,edit = true,fresh = false,keepFullscreen = false) => {
+    const alreadyOpen = modal.open;
     key=id;
-    setFullscreen(false);
+    if (!keepFullscreen) setFullscreen(false);
     viewport.reset();
     clearHistory();
+    syncGallery();
     const picture = describe(store.answers,id);
     const isIssue=picture.issue===true;
     const attachment = store.answers.attachments[id];
@@ -809,6 +871,9 @@ export function photoViewer(store, changed, describe, hooks) {
       if (selected) requestAnimationFrame(() => { if (modal.open && key === id) openPop(selected, cursor, edit, fresh); });
     };
     image.src=src;
-    arm(false); closePop(); render(); modal.showModal(); hooks.opened(id,number || null,fresh); modal.querySelector('[data-close]').focus();
+    arm(false); closePop(); render();
+    if (!alreadyOpen) modal.showModal();
+    hooks.opened(id,number || null,fresh);
+    if (!alreadyOpen) modal.querySelector('[data-close]').focus();
   };
 }

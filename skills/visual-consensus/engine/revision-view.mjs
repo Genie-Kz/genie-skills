@@ -55,6 +55,7 @@ export function presentReview(host, key, model, answers, canArchive, original = 
     if (sectionKind) summary.append(sectionKind);
     summary.append(status, excerpt);
     fold.append(summary, ...host.childNodes);
+    if (model.hasCurrentActivity?.(answers, key)) fold.open = true;
     host.append(fold);
     host._fold = fold;
   }

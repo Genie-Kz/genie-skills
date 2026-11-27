@@ -539,6 +539,31 @@ button.go:disabled {
   min-width: 0;
 }
 
+.drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 6;
+  display: none;
+  place-items: center;
+  border: 2px dashed var(--ui);
+  border-radius: 10px;
+  background: rgba(13, 17, 23, .74);
+  pointer-events: none;
+}
+
+.workspace.file-drag-over .drop-overlay { display: grid; }
+
+.drop-overlay span {
+  padding: 8px 16px;
+  border: 1px solid var(--ui);
+  border-radius: 99px;
+  background: var(--subtle);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(1, 4, 9, .65);
+}
+
 .main {
   min-width: 0;
   overflow: auto;
@@ -1355,10 +1380,32 @@ input.image-name-input, input.image-name-input:focus-visible {
 
 /* 共通エディタ（GitHub のコメント欄に倣った上部ツールバー＋本文＋下部フッター） */
 .editor {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--field);
   overflow: hidden;
+}
+
+.editor.editor-drop-over {
+  border-style: dashed;
+  border-color: var(--ui);
+  box-shadow: inset 0 0 0 1px var(--ui);
+}
+
+.editor.editor-drop-over::after {
+  content: "ドロップで画像を挿入";
+  position: absolute;
+  right: 8px;
+  bottom: 44px;
+  padding: 2px 9px;
+  border: 1px solid rgba(68, 147, 248, .55);
+  border-radius: 99px;
+  background: var(--subtle);
+  color: var(--ui);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
 }
 
 .editor:focus-within {
@@ -1436,6 +1483,8 @@ input.image-name-input, input.image-name-input:focus-visible {
 .ft {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   padding: 6px 10px;
   background: var(--subtle);
   border-top: 1px solid var(--line-soft);
@@ -1445,6 +1494,15 @@ input.image-name-input, input.image-name-input:focus-visible {
   min-height: 28px;
   padding: 3px 12px;
   font-size: 12px;
+}
+
+.ft [data-cancel-edit] {
+  color: var(--muted);
+}
+
+.ft [data-cancel-edit]:hover:enabled {
+  color: var(--ink);
+  background: var(--hover);
 }
 
 /* 初回の保存先案内バナー */
@@ -2229,6 +2287,48 @@ details summary { cursor: pointer; }
   background: var(--bg);
 }
 
+.rv-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rv-img-nav {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--btn);
+  overflow: hidden;
+}
+
+.rv-img-nav button {
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.rv-img-nav button:hover:enabled { background: var(--hover); }
+
+.rv-img-count {
+  padding: 0 8px;
+  border-inline: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 26px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .rv-dialog h2 {
   margin: 0;
   padding: 0;
@@ -2482,9 +2582,11 @@ details summary { cursor: pointer; }
 .rv-pop .editor { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .rv-pop [data-pop-text] .tool { display: none; }
 .rv-pop .txt { min-height: 54px; max-height: 18dvh; border: 1px solid var(--line); border-radius: 6px; --txt-py: 6px; --txt-px: 8px; background: var(--sheet); font-size: 13px; }
-.rv-pop .ft { display: flex; justify-content: space-between; gap: 8px; padding: 0; margin-top: 8px; border: 0; background: transparent; }
+.rv-pop .ft { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 0; margin-top: 8px; border: 0; background: transparent; }
 .rv-pop .ft button { min-height: 28px; padding: 0 10px; font-size: 12px; }
 .rv-pop .ft .text-button { color: var(--muted); }
+.rv-pop .ft .rv-pop-delete { margin-right: auto; }
+.rv-pop .ft .rv-pop-delete:hover:enabled { color: #f85149; background: rgba(248, 81, 73, .14); }
 .rv-pin-list .review-comment:has(.mark-actions) { display: flex; align-items: center; gap: 8px; }
 .mark-actions { display: inline-flex; flex: none; gap: 6px; }
 .rv-pin-list .editing-mark .file-item { display: none; }
@@ -2604,7 +2706,7 @@ details summary { cursor: pointer; }
 @media (pointer: coarse) {
   .rv-header-actions { gap: 8px; }
   .rv-icon-btn { width: 36px; height: 36px; }
-  .rv-zoom-controls button { min-height: 36px; padding: 2px 11px; }
+  .rv-zoom-controls button, .rv-img-nav button { min-height: 36px; padding: 2px 11px; }
 }
 
 @media (max-width: 620px) {
